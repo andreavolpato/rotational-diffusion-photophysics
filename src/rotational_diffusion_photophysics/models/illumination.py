@@ -18,7 +18,7 @@ class SingleLaser:
                                        self.wavelength)  # [photons/cm2]
 
         # Polarization of the beam
-        # It can be 'x', 'y', or 'c' for circular. 
+        # It can be 'x', 'y', or 'c' for circular
         self.polarization = polarization
 
         # Numerical aperture of excitation light beam

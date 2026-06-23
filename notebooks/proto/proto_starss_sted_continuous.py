@@ -10,7 +10,7 @@ from rotational_diffusion_photophysics.plot.plot_pulse_scheme import plot_pulse_
 from rotational_diffusion_photophysics.common import anisotropy
 
 
-def make_exp(tauR=50e-9, sted_pw=1e6, exc_pw=1e3):
+def make_exp(tauR=50e-9, sted_pw=1e8, exc_pw=1e3):
     light = ModulatedLasers(wavelength=  [640, 775],
                             polarization=['x', 'y'],
                             power_density=[exc_pw, sted_pw],
@@ -38,7 +38,8 @@ ax2 = fig.add_subplot(gs[2,0])
 t = np.linspace(-1e-9,100e-9,1000)
 
 
-for tauR in [0.01e-9, 0.1e-9, 1e-9, 10e-9, 100e-9, 1000e-9, 10000e-9]:
+taus = [0.01e-9, 0.1e-9, 1e-9, 10e-9, 100e-9, 1000e-9, 10000e-9]
+for tauR in taus:
     exp = make_exp(tauR=tauR, sted_pw=5e0, exc_pw=1e4)
     signals = exp.detector_signals(t)
     ax1.plot(t, anisotropy(signals))
@@ -47,6 +48,7 @@ for tauR in [0.01e-9, 0.1e-9, 1e-9, 10e-9, 100e-9, 1000e-9, 10000e-9]:
 ax1.set_ylabel('Anisotropy')
 ax1.set_xlabel('Time (s)')
 ax1.sharex(ax0)
+ax1.legend(taus)
 ax2.set_ylabel('Signal (a.u.)')
 ax2.set_xlabel('Time (s)')
 ax2.sharex(ax0)

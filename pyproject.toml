@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rotational-diffusion-photophysics"
+version = "0.3.0"
+description = "Tools for computing time-dependent fluorescence signals with rotational diffusion and complex photophysics."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Andrea Volpato", email = "andrea.volpato@outlook.com" },
+]
+requires-python = ">=3.10"
+keywords = ["fluorescence", "rotational diffusion", "photophysics", "spherical harmonics", "STARSS"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.21",
+    "pyshtools>=4.10",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+plot = [
+    "colour",
+    "quaternionic",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/andreavolpato/rotational_diffusion_photophysics"
+Paper = "https://doi.org/10.1038/s41587-022-01489-7"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
