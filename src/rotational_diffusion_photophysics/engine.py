@@ -91,12 +91,18 @@ class System:
         c_det = self.detection.detector_coeffs(self._l, self._m)
         ndetectors = c_det.shape[0]
 
-        # Initialize signal array and compute signals
+        # Initialize signal array and compute signals.
+        # s[i] is the bare SH-coefficient dot product sum_lm c_det[i]_lm c_fluo_lm.
+        # In the '4pi' convention this is already the orientational integral of
+        # (molecular density x per-molecule collection efficiency): the 4*pi from
+        # the SH inner product (int f g dOmega = 4*pi sum c_f c_g) cancels the
+        # 1/(4*pi) in the density normalization (c_00 = population = orientational
+        # mean). So no extra scaling is applied. Cf. notes.tex eq. (highna_detection)
+        # with the experimental constant A = 1; e.g. an isotropic excited state
+        # gives s = (1/3) Phi P, the cos^2 average a linear detector collects.
         s = np.zeros( (ndetectors, time.size) )
         for i in range(ndetectors):
             s[i] = np.sum(c_det[i][None,:,None] * c_fluo, axis=(0,1))
-        if self.norm == '4pi':
-            s = s/4*np.pi
 
         # Save variables, mainly for debugging.
         self._c_det = c_det
@@ -155,7 +161,7 @@ class System:
             time_i = time_i - time_mod[i]
 
             # Solve the time evolution
-            c_i, _, _ = solve_evolution(M[i], c0, time_i)
+            c_i, _, _ = solve_evolution(M[i], c0, time_i, l=self._l)
 
             # Save results and update initial conditions for the next window
             c[:,:,time_sel] = c_i[:,:,:-1]
@@ -257,7 +263,7 @@ def quantum_numbers(lmax):
     m = np.int32(m)
     return l, m
 
-def solve_evolution(M, c0, time):
+def solve_evolution(M, c0, time, l=None):
     # Analitically solve the diffusion-kinetic problem by matrix exp of M.
     # We compute p(t) = U exp(L t) U^-1 p0, where (L, U) diagonalize M.
     nspecies = c0.shape[0]
@@ -268,14 +274,21 @@ def solve_evolution(M, c0, time):
     M = np.transpose(M, axes=[0,2,1,3])
     M = np.reshape(M, [nspecies*ncoeffs, nspecies*ncoeffs])
 
-    #TODO: Optimize matrix multiplication for only c0 values different from zero
-    # Coefficients of starting conditions that are zeros
-    # Useful for optimizing matrix multiplication
-    # Most of the coefficient are zero because of simmetry and could be removed
-    # from the problem.
+    # Restrict the eigenproblem to the even-l subspace.
+    # Rotational diffusion is diagonal in l, linear light-matter interaction
+    # couples only l1=0 and l1=2 (parity preserving), and the initial condition
+    # lives entirely in l=0. Even-l and odd-l coefficients therefore never mix,
+    # and the odd-l block stays exactly zero for all time. We can drop it from
+    # the (cubic-cost) eig/inv and scatter zeros back afterwards. This is exact
+    # for the implemented linear interaction, not an approximation.
+    # NOTE: if an orientation-dependent process involving odd l1 is ever added
+    # (or a non-l=0 initial condition), pass l=None to disable this reduction.
+    if l is not None:
+        keep = np.nonzero(np.tile(l % 2 == 0, nspecies))[0]
+        M = M[np.ix_(keep, keep)]
+        c0 = c0[keep]
 
-    # Diagonalize M and invert eigenvector matrix
-    # This will optimize the computation of matrix exponentiation.
+    # Diagonalize the (reduced) M and invert the eigenvector matrix.
     L, U = np.linalg.eig(M)
     Uinv = np.linalg.inv(U)
 
@@ -283,15 +296,18 @@ def solve_evolution(M, c0, time):
     # Project the initial condition onto the eigenbasis, a = U^-1 p0, then
     # the diagonal propagator exp(L t) is just an elementwise factor on a.
     # This replaces the per-time-point python loop (and the np.diag it built
-    # for every time point) with two vectorized BLAS calls, and gives results
-    # identical to the loop to ~1e-14 while being about 2x faster.
-    a = Uinv.dot(c0)                  # eigenbasis amplitudes, shape (N,)
-    propagator = np.exp(np.outer(L, time))  # exp(L t), shape (N, time.size)
-    c = U.dot(a[:, None] * propagator)       # back to SH basis, (N, time.size)
-    c = np.real(c)  # Discard small rounding error complex parts
+    # for every time point) with two vectorized BLAS calls.
+    a = Uinv.dot(c0)                  # eigenbasis amplitudes
+    propagator = np.exp(np.outer(L, time))  # exp(L t), shape (Nkeep, time.size)
+    cr = np.real(U.dot(a[:, None] * propagator))  # discard rounding-error imag
 
-    # Reshape the coefficients into a 3D array, separating the coefficients
-    # for each species.
+    # Scatter the solved coefficients back into the full SH basis (odd-l rows
+    # stay zero), then reshape into a 3D array separating the species.
+    if l is not None:
+        c = np.zeros((nspecies*ncoeffs, time.size))
+        c[keep] = cr
+    else:
+        c = cr
     c = np.reshape(c, (nspecies, ncoeffs, time.size))
     return c, L, U
 
