@@ -12,7 +12,7 @@ from rotational_diffusion_photophysics.models.detection import PolarizedDetectio
 from rotational_diffusion_photophysics.models.diffusion import IsotropicDiffusion
 from rotational_diffusion_photophysics.models.fluorophore import rsEGFP2_8states
 from rotational_diffusion_photophysics.models.illumination import ModulatedLasers
-from rotational_diffusion_photophysics.common import anisotropy
+from rotational_diffusion_photophysics.utils.signals import anisotropy
 
 
 @pytest.fixture

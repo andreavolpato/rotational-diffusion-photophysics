@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from rotational_diffusion_photophysics.models.starss import starss_sted
 from rotational_diffusion_photophysics.plot.plot_pulse_scheme import plot_pulse_scheme
-from rotational_diffusion_photophysics.common import anisotropy
+from rotational_diffusion_photophysics.utils.signals import anisotropy
 
 t = np.linspace(-1e-9,12e-9,1000)
 signals = starss_sted.detector_signals(t)

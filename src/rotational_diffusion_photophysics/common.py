@@ -1,34 +1,10 @@
 import numpy as np
 import pyshtools as sht  # used in spherical calculations
 
-################################################################################
-# Anisotropy
-################################################################################
-
-def anisotropy(signals):
-    return (signals[0] - signals[1]) / (signals[0] + 2*signals[1])
-
-def anisotropy_variance(signals, signals_minus_background):
-    il_wobg = signals_minus_background[0]; # Intensity parallel w/o background
-    ip_wobg = signals_minus_background[1]; # Intensity perpendicular w/o background
-    E_il = signals[0]; # Intensity parallel
-    E_ip = signals[1]; # Intensity perpendicular
-    
-    # Expectations, variances and covariances
-    Cov_il_ip = - E_il * E_ip / (E_il + E_ip)
-    E_N = np.abs(il_wobg - ip_wobg)
-    E_D = np.abs(il_wobg + 2*ip_wobg)
-    Var_N = E_il + E_ip - 2*Cov_il_ip
-    Var_D = E_il + 4*E_ip + 4*Cov_il_ip
-    Cov_N_D = E_il - 2*E_ip + Cov_il_ip
-    
-    # Anisotropy Variance (see DP 20200224) and reference
-    Var_r = (
-        Var_N/np.power(E_D,2) 
-        - 2*E_N*Cov_N_D/np.power(E_D,3) 
-        + Var_D/np.power(E_D,4)
-        )
-    return Var_r
+# NOTE: anisotropy and polarization (values, variances, and SNRs) live in
+# rotational_diffusion_photophysics.utils.signals, which is the single source of
+# truth for them. The previous anisotropy_variance here was buggy (inconsistent
+# Poisson/multinomial covariance and an abs() on the numerator); see a30 n020.
 
 ################################################################################
 # Auxiliary functions
