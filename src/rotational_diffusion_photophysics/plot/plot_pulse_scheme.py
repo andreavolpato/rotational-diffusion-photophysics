@@ -55,10 +55,10 @@ def plot_pulse_scheme(exp, xlim=[-.1e-3, 1e-3], ylim=[0, 6e4], yscale='linear'):
 
 
 if __name__ == '__main__':
-    from rotational_diffusion_photophysics.models.starss import starss1
+    from rotational_diffusion_photophysics.experiments.exp001_starss_method1 import experiment
 
     xlim = [-.1e-3, 1e-3]
     ylim = [0, 6e4]
     yscale = 'linear'
-    plot_pulse_scheme(starss1, xlim=xlim, ylim=ylim, yscale=yscale)
+    plot_pulse_scheme(experiment().build(), xlim=xlim, ylim=ylim, yscale=yscale)
     plt.show()

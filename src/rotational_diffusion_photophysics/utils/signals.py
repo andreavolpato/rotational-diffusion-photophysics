@@ -142,11 +142,13 @@ def _ratio_variance(value, variance, perp_factor):
     Var_N = var_par + var_perp
     Var_D = var_par + perp_factor ** 2 * var_perp
     Cov_N_D = var_par - perp_factor * var_perp
-    return (
-        Var_N / D ** 2
-        - 2 * N * Cov_N_D / D ** 3
-        + N ** 2 * Var_D / D ** 4
-    )
+    # D = 0 where there is no signal -> nan (variance undefined there).
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return (
+            Var_N / D ** 2
+            - 2 * N * Cov_N_D / D ** 3
+            + N ** 2 * Var_D / D ** 4
+        )
 
 
 # ----------------------------------------------------------------------------
@@ -158,7 +160,8 @@ def counts_snr(channels, backgrounds=None, background_averages=1):
     With zero background this is pure shot noise, ``SNR = sqrt(M)``.
     """
     signal, variance = background_subtract(channels, backgrounds, background_averages)
-    return signal / np.sqrt(variance)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return signal / np.sqrt(variance)
 
 
 # ----------------------------------------------------------------------------
@@ -167,7 +170,9 @@ def counts_snr(channels, backgrounds=None, background_averages=1):
 def anisotropy(channels, backgrounds=None, background_averages=1):
     """Fluorescence anisotropy from background-subtracted channels."""
     signal, _ = background_subtract(channels, backgrounds, background_averages)
-    return (signal[0] - signal[1]) / (signal[0] + 2 * signal[1])
+    # 0/0 where there is no signal -> nan (anisotropy is undefined there).
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return (signal[0] - signal[1]) / (signal[0] + 2 * signal[1])
 
 
 def anisotropy_variance(channels, backgrounds=None, background_averages=1):
@@ -180,7 +185,8 @@ def anisotropy_snr(channels, backgrounds=None, background_averages=1):
     """SNR of the fluorescence anisotropy."""
     r = anisotropy(channels, backgrounds, background_averages)
     var = anisotropy_variance(channels, backgrounds, background_averages)
-    return r / np.sqrt(var)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return r / np.sqrt(var)
 
 
 # ----------------------------------------------------------------------------
@@ -190,7 +196,9 @@ def anisotropy_snr(channels, backgrounds=None, background_averages=1):
 def polarization(channels, backgrounds=None, background_averages=1):
     """Polarization from background-subtracted channels."""
     signal, _ = background_subtract(channels, backgrounds, background_averages)
-    return (signal[0] - signal[1]) / (signal[0] + signal[1])
+    # 0/0 where there is no signal -> nan (polarization is undefined there).
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return (signal[0] - signal[1]) / (signal[0] + signal[1])
 
 
 def polarization_variance(channels, backgrounds=None, background_averages=1):
@@ -203,4 +211,5 @@ def polarization_snr(channels, backgrounds=None, background_averages=1):
     """SNR of the polarization."""
     p = polarization(channels, backgrounds, background_averages)
     var = polarization_variance(channels, backgrounds, background_averages)
-    return p / np.sqrt(var)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return p / np.sqrt(var)

@@ -1,5 +1,5 @@
 import numpy as np
-from rotational_diffusion_photophysics.common import na_corrected_linear_coeffs, photon_flux, kinetic_prod_block
+from rotational_diffusion_photophysics.utils.common import na_corrected_linear_coeffs, photon_flux, kinetic_prod_block
 
 ######################
 # Illumination classes

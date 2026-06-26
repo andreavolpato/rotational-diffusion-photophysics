@@ -10,8 +10,7 @@ import os
 import numpy as np
 import pytest
 
-from rotational_diffusion_photophysics.models import starss
-from tests.generate_baselines import CASES, STARSS3_DELAYS
+from tests.generate_baselines import CASES, STARSS3_DELAYS, starss3_normalized_counts
 
 BASELINE_PATH = os.path.join(os.path.dirname(__file__), "data", "baselines.npz")
 
@@ -44,7 +43,7 @@ def test_detector_signals_match_baseline(name, baselines):
 def test_starss3_observable_matches_baseline(baselines):
     np.testing.assert_allclose(STARSS3_DELAYS, baselines["starss3__delays"])
 
-    s, _ = starss.starss3_detector_signals(STARSS3_DELAYS)
+    s = starss3_normalized_counts(STARSS3_DELAYS)
     np.testing.assert_allclose(
         s, baselines["starss3__signal"], rtol=RTOL, atol=ATOL
     )
