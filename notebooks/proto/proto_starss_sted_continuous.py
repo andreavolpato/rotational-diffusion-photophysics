@@ -5,7 +5,7 @@ from rotational_diffusion_photophysics.models.illumination import ModulatedLaser
 from rotational_diffusion_photophysics.models.fluorophore import atto647N
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
 from rotational_diffusion_photophysics.models.diffusion import IsotropicDiffusion
-from rotational_diffusion_photophysics.engine import System
+from rotational_diffusion_photophysics.engine_s2 import SystemS2 as System
 from rotational_diffusion_photophysics.plot.plot_pulse_scheme import plot_pulse_scheme
 from rotational_diffusion_photophysics.common import anisotropy
 

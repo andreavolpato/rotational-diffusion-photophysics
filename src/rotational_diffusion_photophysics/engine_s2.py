@@ -15,11 +15,18 @@ import numpy as np
 import pyshtools as sht  # used in many spherical calculations
 # import spherical as sf  # currently used only for CG coefficients
 
+# Basis-agnostic solver primitives shared with engine_so3 (see core.py).
+from rotational_diffusion_photophysics.core import (
+    find_wavelenght,
+    solve_evolution,
+    diffusion_kinetics_matrix,
+)
+
 ################################################################################
 # Classes for programming experiments
 ################################################################################
 
-class System:
+class SystemS2:
     def __init__(self,
                  fluorophore,
                  diffusion,
@@ -237,19 +244,6 @@ class System:
 # Engine of the rotational-diffusion and kinetics solver
 ################################################################################
 
-def find_wavelenght(wavelength, laser):
-    wavelength = np.array(wavelength)
-    laser = np.array(laser)
-
-    laser_to_use = np.isin(laser, wavelength)
-    assert np.all(laser_to_use), "Fluorophore data at one or more laser wavelenghts is missing."
-
-    wavelength_indexes = np.zeros(laser.shape)
-    for i, laseri in enumerate(laser):
-        wavelength_indexes[i] = np.where(wavelength == laseri)[0]
-    wavelength_indexes = np.int32(wavelength_indexes)
-    return wavelength_indexes
-
 def quantum_numbers(lmax):
     # Generate arrays with quantum numbers l and m
     l = np.array([])
@@ -262,54 +256,6 @@ def quantum_numbers(lmax):
     l = np.int32(l)
     m = np.int32(m)
     return l, m
-
-def solve_evolution(M, c0, time, l=None):
-    # Analitically solve the diffusion-kinetic problem by matrix exp of M.
-    # We compute p(t) = U exp(L t) U^-1 p0, where (L, U) diagonalize M.
-    nspecies = c0.shape[0]
-    ncoeffs = c0.shape[1]
-
-    # Variables with unique index for species and spherical harmonics
-    c0 = c0.flatten()
-    M = np.transpose(M, axes=[0,2,1,3])
-    M = np.reshape(M, [nspecies*ncoeffs, nspecies*ncoeffs])
-
-    # Restrict the eigenproblem to the even-l subspace.
-    # Rotational diffusion is diagonal in l, linear light-matter interaction
-    # couples only l1=0 and l1=2 (parity preserving), and the initial condition
-    # lives entirely in l=0. Even-l and odd-l coefficients therefore never mix,
-    # and the odd-l block stays exactly zero for all time. We can drop it from
-    # the (cubic-cost) eig/inv and scatter zeros back afterwards. This is exact
-    # for the implemented linear interaction, not an approximation.
-    # NOTE: if an orientation-dependent process involving odd l1 is ever added
-    # (or a non-l=0 initial condition), pass l=None to disable this reduction.
-    if l is not None:
-        keep = np.nonzero(np.tile(l % 2 == 0, nspecies))[0]
-        M = M[np.ix_(keep, keep)]
-        c0 = c0[keep]
-
-    # Diagonalize the (reduced) M and invert the eigenvector matrix.
-    L, U = np.linalg.eig(M)
-    Uinv = np.linalg.inv(U)
-
-    # Evaluate p(t) = U exp(L t) U^-1 p0 at all requested times at once.
-    # Project the initial condition onto the eigenbasis, a = U^-1 p0, then
-    # the diagonal propagator exp(L t) is just an elementwise factor on a.
-    # This replaces the per-time-point python loop (and the np.diag it built
-    # for every time point) with two vectorized BLAS calls.
-    a = Uinv.dot(c0)                  # eigenbasis amplitudes
-    propagator = np.exp(np.outer(L, time))  # exp(L t), shape (Nkeep, time.size)
-    cr = np.real(U.dot(a[:, None] * propagator))  # discard rounding-error imag
-
-    # Scatter the solved coefficients back into the full SH basis (odd-l rows
-    # stay zero), then reshape into a 3D array separating the species.
-    if l is not None:
-        c = np.zeros((nspecies*ncoeffs, time.size))
-        c[keep] = cr
-    else:
-        c = cr
-    c = np.reshape(c, (nspecies, ncoeffs, time.size))
-    return c, L, U
 
 def wigner_3j_prod_3darray(l, m):
     # 3D array with all the coefficient for sh multiplication
@@ -392,26 +338,6 @@ def wigner_3j_all_l_m0(l, l1, l2, lmax):
     l3 = np.arange(lmax+1)
     w3jl = w3jl[l]
     return w3jl
-
-def diffusion_kinetics_matrix(D, K):
-    # Create the full kinetic diffusion matrix expanded in sh
-    nspecies = D.shape[0]
-    M = np.zeros(K.shape)
-
-    for i in range(nspecies):
-        for j in range(nspecies):
-            # Add the rotational diffusion blocks on the diagonal
-            if i==j:
-                M[i,i] = D[i]
-            # Add the kinetics blocks in all the slots
-            M[i,j] = M[i,j] + K[i,j]
-
-    # Add on the diagonal the kinetics contributions that deplete the states
-    for i in range(nspecies):
-        for j in range(nspecies):
-            if i != j:
-                M[i,i] = M[i,i] - M[j,i]
-    return M
 
 ################################################################################
 # Unused functions - still possibly useful

@@ -23,6 +23,9 @@ class NegativeSwitcher:
                  quantum_yield_cis_to_trans_neutral=0, # for 8 states model
                  quantum_yield_cis_anionic_bleaching=0,
                  quantum_yield_trans_anionic_bleaching=0,
+                 dipole_orientation_cis_anionic=(35.0, 0.0),   # on-state [deg]
+                 dipole_orientation_cis_neutral=(35.0-13.0, 0.0),  # Rosell&Boxer 2003: neutral ~13 deg from anionic (26 vs 13 deg from O-O axis) [deg]
+                 dipole_orientation_trans=(0.0, 0.0),        # off-state [deg]
                  flurophore_type='rsfp_negative_4states'):
         #TODO: make simpler init passing only variables to self.
         #      Afterwards in the kinetic_matrix() method compute the necessary parameters.
@@ -72,6 +75,14 @@ class NegativeSwitcher:
         # This is not necessary in general and could be extended in the future.
         self.quantum_yield_fluo = np.zeros((self.nspecies))
         self.quantum_yield_fluo[1] = self.quantum_yield_on_fluo
+        
+        # Transition-dipole orientation of each chromophore species: (theta, phi)
+        # in radians in the barrel (molecular) frame, theta measured from the z-axis.
+        # The on-state (cis anionic) dipole anchors barrel-z -> (0, 0). Diffusion is
+        # isotropic, so only relative orientations matter (a40 n010/n030).
+        self.dipole_orientation_cis_anionic = np.radians(dipole_orientation_cis_anionic)
+        self.dipole_orientation_cis_neutral = np.radians(dipole_orientation_cis_neutral)
+        self.dipole_orientation_trans = np.radians(dipole_orientation_trans)
 
         # Population at the beginning of the experiment
         self.starting_populations = starting_populations
@@ -155,6 +166,43 @@ class NegativeSwitcher:
 
         return K
 
+    def dipole_orientations(self):
+        # Per-state transition-dipole direction (theta, phi) in the barrel frame.
+        # The dipole follows the chromophore species: cis-anionic (on), cis-neutral
+        # (on-switch intermediate), and trans (both protonations lumped into one
+        # direction). Excited states share their ground-state geometry.
+        # NOTE: the cis/trans isomerization is what swings the dipole, so the
+        # switching intermediates do NOT follow a first-half/second-half split:
+        # trans-anionic is already trans, cis-neutral is already cis.
+        orientations = np.zeros((self.nspecies, 2))
+
+        if self.fluorophore_type == 'rsFP_negative_4states':
+            # 0,1 cis anionic (on) | 2,3 trans neutral (off)
+            orientations[[0, 1]] = self.dipole_orientation_cis_anionic
+            orientations[[2, 3]] = self.dipole_orientation_trans
+
+        elif self.fluorophore_type == 'rsFP_negative_6states':
+            # 0,1 cis anionic | 2 trans anionic, 3,4 trans neutral | 5 cis neutral
+            orientations[[0, 1]] = self.dipole_orientation_cis_anionic
+            orientations[[2, 3, 4]] = self.dipole_orientation_trans
+            orientations[[5]] = self.dipole_orientation_cis_neutral
+
+        elif self.fluorophore_type == 'rsFP_negative_8states':
+            # 0,1 cis anionic | 2,3 trans anionic, 4,5 trans neutral | 6,7 cis neutral
+            orientations[[0, 1]] = self.dipole_orientation_cis_anionic
+            orientations[[2, 3, 4, 5]] = self.dipole_orientation_trans
+            orientations[[6, 7]] = self.dipole_orientation_cis_neutral
+
+        elif self.fluorophore_type == 'rsFP_negative_9states_bleaching':
+            # as 8-states; state 8 is the bleached dark spectator -> leave (0, 0)
+            orientations[[0, 1]] = self.dipole_orientation_cis_anionic
+            orientations[[2, 3, 4, 5]] = self.dipole_orientation_trans
+            orientations[[6, 7]] = self.dipole_orientation_cis_neutral
+
+        return orientations
+        
+
+
 # rsEGFP2 Models
 rsEGFP2_4states = NegativeSwitcher(extinction_coeff_on=[5260, 51560],
                                     extinction_coeff_off=[22000, 60],
@@ -194,7 +242,7 @@ rsEGFP2_9states = NegativeSwitcher(extinction_coeff_on= [  5260, 51560],
                                    protonation_time_on=48e-6,
                                    quantum_yield_trans_to_cis_anionic=0.0165,
                                    quantum_yield_cis_to_trans_neutral=0.33,
-                                   flurophore_type='rsFP_negative_9states',
+                                   flurophore_type='rsFP_negative_9states_bleaching',
                                    )
 
 ## Generic switchers

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from rotational_diffusion_photophysics.engine import System
+from rotational_diffusion_photophysics import core
 from rotational_diffusion_photophysics.models.fluorophore import rsEGFP2_8states
 from rotational_diffusion_photophysics.models.illumination import ModulatedLasers
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
@@ -28,7 +28,7 @@ class results:
     signals: np.ndarray        # two-pulse detector signal (1, ntime)
     signals_1pulse: np.ndarray # one-pulse detector signal (1, ntime)
     normalized_count: float    # integrated two-pulse / one-pulse counts (~1..2)
-    system: System             # the (two-pulse) solved engine System
+    system: object             # the (two-pulse) solved engine (SystemS2 / SystemSO3)
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ class experiment:
         t = np.linspace(0, self.integration_time, self.n_time)
         return np.append(t, self.background_time)
 
-    def build(self, first_pulse: bool = True) -> System:
+    def build(self, first_pulse: bool = True):
         """Construct the engine System; ``first_pulse=False`` drops the first 405 pulse."""
         diffusion = IsotropicDiffusion(diffusion_coefficient=1 / (6 * self.tau))
         time_windows = [
@@ -105,12 +105,13 @@ class experiment:
             numerical_aperture=self.na,
             refractive_index=self.ri,
         )
-        return System(
-            illumination=lasers,
+        return core.System(
             fluorophore=self.fluorophore,
             diffusion=diffusion,
+            illumination=lasers,
             detection=detection,
             lmax=self.lmax,
+            representation='s2',
         )
 
     def run(self) -> results:

@@ -12,7 +12,9 @@ import pytest
 
 CORE_MODULES = [
     "rotational_diffusion_photophysics",
-    "rotational_diffusion_photophysics.engine",
+    "rotational_diffusion_photophysics.core",
+    "rotational_diffusion_photophysics.engine_s2",
+    "rotational_diffusion_photophysics.engine_so3",
     "rotational_diffusion_photophysics.utils.common",
     "rotational_diffusion_photophysics.utils.signals",
     "rotational_diffusion_photophysics.models.detection",

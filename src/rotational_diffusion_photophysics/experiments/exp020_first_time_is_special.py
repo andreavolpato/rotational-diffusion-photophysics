@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from rotational_diffusion_photophysics.engine import System
+from rotational_diffusion_photophysics import core
 from rotational_diffusion_photophysics.models.fluorophore import rsEGFP2_8states
 from rotational_diffusion_photophysics.models.illumination import ModulatedLasers
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
@@ -24,7 +24,7 @@ class results:
     t: np.ndarray            # time axis [s]
     signals: np.ndarray      # detector signals (ndetectors, ntime)
     populations: np.ndarray  # state populations (nspecies, ntime)
-    system: System           # the solved engine System (e.g. for pulse-scheme plots)
+    system: object           # the solved engine (SystemS2 / SystemSO3)
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ class experiment:
     def time(self) -> np.ndarray:
         return np.linspace(0, self.t_end, self.n_time)
 
-    def build(self) -> System:
+    def build(self):
         """Construct the engine System with the alternating pulse train."""
         diffusion = IsotropicDiffusion(diffusion_coefficient=1 / (6 * self.tau))
         lasers = ModulatedLasers(
@@ -79,12 +79,13 @@ class experiment:
             numerical_aperture=self.na,
             refractive_index=self.ri,
         )
-        return System(
-            illumination=lasers,
+        return core.System(
             fluorophore=self.fluorophore,
             diffusion=diffusion,
+            illumination=lasers,
             detection=detection,
             lmax=self.lmax,
+            representation='s2',
         )
 
     def run(self) -> results:

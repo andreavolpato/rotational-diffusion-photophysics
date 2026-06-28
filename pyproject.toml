@@ -23,12 +23,16 @@ dependencies = [
     "numpy>=1.21",
     "pyshtools>=4.10",
     "matplotlib>=3.5",
+    # SO(3) Wigner-D engine (engine_so3): spherical for D-matrix evaluation,
+    # quaternionic for orientations, sympy for Clebsch-Gordan coefficients.
+    "spherical>=1.0",
+    "quaternionic>=1.0",
+    "sympy>=1.9",
 ]
 
 [project.optional-dependencies]
 plot = [
     "colour",
-    "quaternionic",
 ]
 test = [
     "pytest>=7.0",

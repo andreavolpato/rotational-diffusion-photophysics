@@ -7,7 +7,7 @@ numbers, so they stay meaningful if the numerics are refactored.
 import numpy as np
 import pytest
 
-from rotational_diffusion_photophysics.engine import System
+from rotational_diffusion_photophysics.engine_s2 import SystemS2 as System
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
 from rotational_diffusion_photophysics.models.diffusion import IsotropicDiffusion
 from rotational_diffusion_photophysics.models.fluorophore import rsEGFP2_8states
