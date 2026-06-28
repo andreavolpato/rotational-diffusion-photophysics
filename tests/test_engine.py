@@ -6,6 +6,7 @@ numbers, so they stay meaningful if the numerics are refactored.
 """
 import numpy as np
 import pytest
+from scipy.special import erf
 
 from rotational_diffusion_photophysics.engine_s2 import SystemS2 as System
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
@@ -95,3 +96,59 @@ def test_anisotropy_within_physical_bounds(system):
     assert np.all(np.isfinite(r))
     assert np.all(r >= -0.2 - 1e-6)
     assert np.all(r <= 0.4 + 1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Real-SH product correctness (regression guard for the m!=0 multiplication bug)
+# ---------------------------------------------------------------------------
+# The light-matter "multiply by the photoselection function" operator is built
+# from a real-spherical-harmonic triple-product table. A former implementation
+# used the *complex* Gaunt rule (single output channel m1+m2) and silently
+# dropped the |m1-m2| channel, corrupting every non-axial (x/y linear)
+# excitation once the density carried m!=0 content (saturation / sequential
+# pulses). See study a40 n030 sec.13. These two tests pin the correct physics.
+
+class _SaturationDye:
+    """Minimal 2-state dye, 0 -> 1 by light only (no decay, no switching)."""
+    nspecies = 2
+    quantum_yield_fluo = np.array([0.0, 1.0])
+    starting_populations = [1.0, 0.0]
+    wavelength = np.array([488.0])
+    cross_section = 1e-16
+
+    def kinetics_matrix(self):
+        k = np.zeros((2, 2, 2))
+        k[1][1, 0] = self.cross_section
+        return k
+
+    def dipole_orientations(self):
+        return np.zeros((self.nspecies, 2))
+
+
+def _ground_after_saturation(polarization, a=3.0, lmax=6):
+    """Total ground-state population after dose a = sigma * flux * t."""
+    laser = ModulatedLasers(
+        power_density=[1e-2], wavelength=[488], polarization=[polarization],
+        modulation=[[1]], time_windows=[1e9], time0=0.0,
+        numerical_aperture=0.01, refractive_index=1.518,
+    )
+    detector = PolarizedDetection(
+        polarization=["z"], numerical_aperture=0.01, refractive_index=1.518)
+    dye = _SaturationDye()
+    system = System(fluorophore=dye, diffusion=IsotropicDiffusion(0.0),
+                    illumination=laser, detection=detector, lmax=lmax)
+    flux = laser.photon_flux[0]
+    system.solve(np.array([0.0, a / (dye.cross_section * flux)]))
+    return float(system._c[0, 0, -1].real)
+
+
+@pytest.mark.parametrize("polarization", ["x", "y", "z"])
+def test_saturation_total_population_is_rotation_invariant(polarization):
+    # Orientational hole-burning by a single linear laser depletes the ground
+    # state; the *total* remaining ground population is a scalar and therefore
+    # cannot depend on the lab-frame polarization direction. It must match the
+    # closed form N0(a) = sqrt(pi) erf(sqrt(a)) / (2 sqrt(a)).
+    a = 3.0
+    analytic = np.sqrt(np.pi) * erf(np.sqrt(a)) / (2 * np.sqrt(a))
+    n0 = _ground_after_saturation(polarization, a=a)
+    np.testing.assert_allclose(n0, analytic, rtol=2e-4)

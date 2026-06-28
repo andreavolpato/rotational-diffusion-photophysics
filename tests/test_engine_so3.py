@@ -389,3 +389,77 @@ def test_reduction_optics_na_matches_old_engine():
                 f_old = sht.expand.MakeGridPoint(cilm, 90 - colat, lon)
                 assert abs(f_new - f_cf) < 1e-10, f"engine A {pol},NA={na}"
                 assert abs(f_old - f_cf) < 1e-10, f"old engine {pol},NA={na}"
+
+
+# --- absolute rate validation (independent closed-form checks) ----------------
+class _ExciteOnlyDye:
+    """2-state fluorophore, 0 -> 1 by 488 light only (no decay/switching). The
+    ground population then probes the bare excitation rate / saturation."""
+    nspecies = 2
+    quantum_yield_fluo = np.array([0.0, 1.0])
+    starting_populations = [1.0, 0.0]
+    wavelength = np.array([488.0])
+
+    def __init__(self, cross_section):
+        self.cross_section = cross_section
+
+    def kinetics_matrix(self):
+        K = np.zeros((2, 2, 2))
+        K[1][1, 0] = self.cross_section   # 0 -> 1; K[0] = 0 (no decay)
+        return K
+
+    def dipole_orientations(self):
+        return np.zeros((2, 2))
+
+
+def _excite_only_system(pol, na, rep, lmax, cross_section=1e-16, power=1e-2):
+    from rotational_diffusion_photophysics.models.illumination import ModulatedLasers
+    from rotational_diffusion_photophysics.models.detection import PolarizedDetection
+    from rotational_diffusion_photophysics.models.diffusion import IsotropicDiffusion
+    las = ModulatedLasers(power_density=[power], wavelength=[488], polarization=[pol],
+                          modulation=[[1]], time_windows=[1e9], time0=0.0,
+                          numerical_aperture=na, refractive_index=1.518)
+    det = PolarizedDetection(polarization=['z'], numerical_aperture=na, refractive_index=1.518)
+    sysm = core.System(_ExciteOnlyDye(cross_section),
+                       IsotropicDiffusion(diffusion_coefficient=0.0),
+                       las, det, lmax=lmax, representation=rep)
+    sF = cross_section * las.photon_flux[0]      # absolute excitation rate scale
+    return sysm, sF
+
+
+@pytest.mark.parametrize("rep", ["s2", "so3"])
+@pytest.mark.parametrize("pol,na", [("z", 1.4), ("x", 1.4), ("xy", 1.4),
+                                    ("z", 0.01), ("xy", 0.01)])
+def test_isotropic_excitation_rate(rep, pol, na):
+    # The INITIAL total excitation rate of an isotropic ensemble equals sF/3 for
+    # ANY polarization (linear x/y/z or circular) and ANY NA -- because
+    # <|e.mu|^2>_iso = 1/3 and the Axelrod NA correction conserves the total
+    # (k0+k1+k2=1). This pins the ABSOLUTE rate, independent of the angular optics.
+    pytest.importorskip("spherical")
+    sysm, sF = _excite_only_system(pol, na, rep, lmax=6)
+    dt = 1e-4 / sF                                # so sF*dt << 1 (initial slope)
+    sysm.solve(np.array([0.0, dt]))
+    n_ground = sysm._c[0, 0, :].real             # total ground population N0(t)
+    rate = -(n_ground[1] - n_ground[0]) / dt
+    np.testing.assert_allclose(rate, sF / 3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("rep", ["s2", "so3"])
+def test_saturation_matches_closed_form(rep):
+    # Continuous ideal z-polarized excitation, no decay: each orientation depletes
+    # as exp(-sF cos^2(theta) t), so the isotropic ground population is exactly
+    #   N0(t) = sqrt(pi) erf(sqrt(a)) / (2 sqrt(a)),  a = sF t
+    # (orientational hole-burning). This validates the ABSOLUTE saturation
+    # dynamics; both engines must converge to it as lmax rises.
+    import math
+    pytest.importorskip("spherical")
+    sysm, sF = _excite_only_system("z", 0.01, rep, lmax=6)
+    t = np.linspace(0.0, 2.0 / sF, 12)
+    a = sF * t
+    analytic = np.ones_like(a)
+    nz = a > 0
+    analytic[nz] = [math.sqrt(math.pi) * math.erf(math.sqrt(ai)) / (2 * math.sqrt(ai))
+                    for ai in a[nz]]
+    sysm.solve(t)
+    n_ground = sysm._c[0, 0, :].real
+    np.testing.assert_allclose(n_ground, analytic, atol=1e-4)

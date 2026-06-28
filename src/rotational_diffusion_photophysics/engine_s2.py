@@ -48,10 +48,11 @@ class SystemS2:
         # Compute arrays with quantum numbers l and m of the SH basis set.
         self._l, self._m = quantum_numbers(self.lmax)
 
-        # Compute wigner3j coefficients. These are necessary for the evaluation
-        # of the product of angular functions from the SH expansion 
-        # coefficients.
-        self._wigner3j_prod_coeffs = wigner_3j_prod_3darray(self._l, self._m)
+        # Compute the real-SH triple-product table. These coefficients are
+        # necessary for the evaluation of the product of angular functions from
+        # the SH expansion coefficients (i.e. the "multiply by a function"
+        # operator used for light-matter interaction).
+        self._wigner3j_prod_coeffs = real_sh_product_coeffs(self._l, self._m)
 
         # Import the classes containing the parametrization and characteristics
         # of fluorophore, diffusion model, illumination, and detection.
@@ -257,87 +258,58 @@ def quantum_numbers(lmax):
     m = np.int32(m)
     return l, m
 
-def wigner_3j_prod_3darray(l, m):
-    # 3D array with all the coefficient for sh multiplication
-    # Here we use Wigner3j symbols from sht, it is 10-20 time faster than
-    # clebsch_gordan_prod_3darray(l, m).
-
-    # Preliminary computations
+def real_sh_product_coeffs(l, m):
+    # 3D table for the product of two real spherical harmonics (4pi norm):
+    #   w3jp[i,j,k] = coefficient of R_k in the product  R_i * R_j ,
+    # so that "multiply by a function g" becomes the matrix
+    #   F[k,j] = sum_i w3jp[i,j,k] * g_i      (see kinetic_prod_block).
+    #
+    # The table is computed exactly by quadrature on a Driscoll-Healy grid:
+    # synthesise R_i and R_j, multiply them pointwise, and analyse the product
+    # back to SH coefficients. This is convention-consistent with the rest of
+    # the engine (pyshtools, '4pi' norm, csphase=1) by construction.
+    #
+    # WHY NOT WIGNER-3j: the previous implementation used the *complex* SH
+    # Gaunt rule (a single output channel m3 = m1+m2). For pyshtools *real*
+    # harmonics the product of two m!=0 harmonics also has a |m1-m2| channel
+    # (e.g. cos2phi*cos2phi = 1/2 + 1/2 cos4phi -> m=0 AND m=4). Dropping it
+    # corrupted every non-axial (x/y linear) excitation as soon as the density
+    # carried m!=0 content (saturation / sequential pulses): total excited
+    # population stopped being rotation invariant. See study a40 n030 sec.13.
+    #
+    # As before, only multiplier indices i with l in {0,2} are filled: linear
+    # light-matter photoselection functions have degree <= 2.
     n = l.size
-    lmax = np.uint(np.max(l))
+    lmax = int(np.max(l))
+    grid_lmax = 2 * lmax + 2  # resolve products up to degree lmax+2 (no aliasing)
     w3jp = np.zeros([n, n, n])
 
-    # Limit calculation to allowed l1 indexes
-    # This optimization uses the fact that l1 can assume only limite values 
-    # in light-matter interaction.
-    # For linear interaction only l1=0 and l1=2 are allowed.
-    l1_allowed = np.logical_or(l==0, l==2)
-    l1_allowed_indexes = np.arange(n)[l1_allowed]
+    def synth(vec):
+        cilm = sht.shio.SHVectorToCilm(vec)
+        return sht.expand.MakeGridDH(cilm, sampling=2, norm=1, csphase=1,
+                                     lmax=grid_lmax)
 
+    def analyze(grid):
+        cilm = sht.expand.SHExpandDH(grid, sampling=2, norm=1, csphase=1,
+                                     lmax_calc=lmax)
+        return sht.shio.SHCilmToVector(cilm, lmax)
+
+    # Synthesise every basis harmonic R_j once.
+    basis_grid = []
+    for j in np.arange(n):
+        ej = np.zeros(n)
+        ej[j] = 1.0
+        basis_grid.append(synth(ej))
+
+    l1_allowed_indexes = np.arange(n)[np.logical_or(l == 0, l == 2)]
     for i in l1_allowed_indexes:
         for j in np.arange(n):
-            # Get all the quantum numbers for 1 and 2
-            l1 = l[i]
-            m1 = m[i]
-            l2 = l[j]
-            m2 = m[j]
-
-            # Compute quantum numbers for 3
-            m3 = -m1-m2 # requirement for w3j to be non zero
-
-            # Compute Wigner3j symbols
-            # w3j0 = w3jcalc.calculate(l1, l2, 0, 0) 
-            # w3j1 = w3jcalc.calculate(l1, l2, m1, m2)
-            w3j1 =  wigner_3j_all_l(l, l1, l2, m3, m1, m2, lmax)
-            w3j0 =  wigner_3j_all_l_m0(l, l1, l2, lmax)
-
-            # Compute SH product coefficients
-            w3jp[i,j,:] = np.sqrt( (2*l1 + 1) * (2*l2 + 1) * (2*l + 1) / 
-                                    (np.pi*4) ) * w3j0 * w3j1 *(-1)**np.double(m3) 
-            #NOTE: (-1)** factor is necessary to match the result obtained
-            # with clebsh-gordan coefficients. I am not sure why it is the case.
-
-    # Constant due to normalizatino issues
-    # Normalization of SH: https://shtools.github.io/SHTOOLS/real-spherical-harmonics.html
-    w3jp = w3jp*np.sqrt(4*np.pi)
+            w3jp[i, j, :] = analyze(basis_grid[i] * basis_grid[j])
     return w3jp
 
-def wigner_3j_all_l(l, l1, l2, m3, m1, m2, lmax):
-    # Compute all Wigner 3j symbols for a set of l3 at l1,l2,m3,m1,m2
-
-    # Compute the coefficients 
-    # https://shtools.github.io/SHTOOLS/pywigner3j.html
-    w3j, l3min, l3max = sht.utils.Wigner3j(l1, l2, m3, m1, m2)
-    l3 = np.arange(l3min, l3max+1)
-    l3 = l3[l3<=lmax]  # Restrict to values below lmax 
-    w3j = w3j[np.arange(l3.size)]
-
-    # Index of l, m vector of SHTools
-    # https://shtools.github.io/SHTOOLS/pyshcilmtovector.html
-    i = np.uint(1.5-np.sign(-m3)/2)  # The sign minus is necessary, m3 = -M
-    k = np.uint(l3**2+(i-1)*l3+np.abs(m3))
-
-    # Final array of l.size with Wigner 3j coefficients
-    w3jl = np.zeros(l.size)
-    w3jl[k] = w3j
-    return w3jl
-
-def wigner_3j_all_l_m0(l, l1, l2, lmax):
-    # Compute all Wigner 3j symbols for a set of l3 at l1,l2,m3,m1,m2
-
-    # Compute the coefficients 
-    # https://shtools.github.io/SHTOOLS/pywigner3j.html
-    w3j, l3min, l3max = sht.utils.Wigner3j(l1, l2, 0, 0, 0)
-    l3 = np.arange(l3min, l3max+1)
-    l3 = l3[l3<=lmax]  # Restrict to values below lmax 
-    w3j = w3j[np.arange(l3.size)]
-
-    # Create array of size l.size adding w3j symbols for all l values
-    w3jl = np.zeros(lmax+1)
-    w3jl[l3] = w3j
-    l3 = np.arange(lmax+1)
-    w3jl = w3jl[l]
-    return w3jl
+# Backwards-compatible alias (the old name was a misnomer: see above, the table
+# is a real-SH product, not a bare Wigner-3j symbol).
+wigner_3j_prod_3darray = real_sh_product_coeffs
 
 ################################################################################
 # Unused functions - still possibly useful

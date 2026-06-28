@@ -91,7 +91,7 @@ class experiment:
             illumination=lasers,
             detection=detection,
             lmax=self.lmax,
-            representation='s2',  # validated S^2 engine; 'auto' would pick SO(3)
+            representation='s2',  # validated SO(3) engine; 'auto' would pick SO(3)
         )                         # for reorienting dipoles (changes results)
 
     def run(self) -> results:
