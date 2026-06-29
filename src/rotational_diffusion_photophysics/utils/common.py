@@ -169,3 +169,38 @@ def kinetic_prod_block(kvec, prod_coeffs):
     #   block[k,j] = sum_i prod_coeffs[i,j,k] * kvec[i].
     kblock = np.transpose(prod_coeffs, [2, 1, 0]).dot(kvec)
     return kblock
+
+
+def sh_multiplication_operator(coeffs, l, m):
+    """Matrix of "multiply the angular function by g", in the real-SH ('4pi')
+    basis, where g has SH coefficients ``coeffs`` (aligned to the (l, m) arrays).
+
+    Built exactly by Driscoll-Healy grid quadrature (synthesise each basis
+    harmonic -> multiply by g on the grid -> analyse the product), so
+        M[k, j] = (1/4pi) int Y_k g Y_j dOmega
+    which is symmetric in (k, j) for real g. Same convention (pyshtools, norm=1,
+    csphase=1) as ``engine_s2.real_sh_product_coeffs``, and equal to
+    ``kinetic_prod_block(coeffs, real_sh_product_coeffs(l, m))`` whenever the
+    latter's multiplier-degree restriction covers ``coeffs``.
+
+    Unlike ``real_sh_product_coeffs`` (which fills only multiplier l in {0, 2},
+    an optimisation for degree-2 light-matter photoselection), this is general in
+    the multiplier degree -- needed for the ordering-potential operator, where the
+    multiplier is V_eff (degree 4) and the c_eq^{+-1/2} factors (degree up to
+    l_max). It builds the operator for one specific g (no (n,n,n) table).
+    """
+    n = l.size
+    lmax = int(np.max(l))
+    grid_lmax = 2 * lmax + 2  # resolve products up to degree 2*lmax (no aliasing)
+    g_grid = sht.expand.MakeGridDH(sht.shio.SHVectorToCilm(np.asarray(coeffs)),
+                                   sampling=2, norm=1, csphase=1, lmax=grid_lmax)
+    M = np.zeros((n, n))
+    for j in range(n):
+        ej = np.zeros(n)
+        ej[j] = 1.0
+        fj = sht.expand.MakeGridDH(sht.shio.SHVectorToCilm(ej), sampling=2,
+                                   norm=1, csphase=1, lmax=grid_lmax)
+        cilm = sht.expand.SHExpandDH(g_grid * fj, sampling=2, norm=1, csphase=1,
+                                     lmax_calc=lmax)
+        M[:, j] = sht.shio.SHCilmToVector(cilm, lmax)
+    return M
