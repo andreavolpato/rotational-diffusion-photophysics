@@ -126,9 +126,20 @@ class SystemS2:
         M = self.diffusion_kinetics_matrix()
 
         # Get the initial conditions for the experiment from the fluorophore
-        # class.
-        c0 = np.zeros( (self.fluorophore.nspecies, self._l.size) )
-        c0[:,0] = self.fluorophore.starting_populations
+        # class. The pre-excitation orientational distribution per species is the
+        # diffusion operator's equilibrium: isotropic (only l=0) for free
+        # diffusion, but anisotropic c_eq for an ordering potential. If the
+        # diffusion model defines that equilibrium, start there (detailed
+        # balance) -- for an aligned/membrane sample starting isotropic would
+        # simulate an unphysical isotropic->c_eq quench (a50 n020 M2.5). c_eq is
+        # normalized so its l=0 coefficient is 1, so c0[:,0] stays the population.
+        starting_populations = np.asarray(self.fluorophore.starting_populations)
+        if hasattr(self.diffusion, "equilibrium_coeffs"):
+            ceq = self.diffusion.equilibrium_coeffs(self._l, self._m)  # c_000 = 1
+            c0 = np.outer(starting_populations, ceq)
+        else:
+            c0 = np.zeros( (self.fluorophore.nspecies, self._l.size) )
+            c0[:,0] = starting_populations
 
         # Optimization, remove all odd l value coefficients from c0 and M.
         # We will need to add them back, after the solution.
