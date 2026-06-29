@@ -52,7 +52,7 @@ class SystemS2:
         # necessary for the evaluation of the product of angular functions from
         # the SH expansion coefficients (i.e. the "multiply by a function"
         # operator used for light-matter interaction).
-        self._wigner3j_prod_coeffs = real_sh_product_coeffs(self._l, self._m)
+        self._sh_product_coeffs = real_sh_product_coeffs(self._l, self._m)
 
         # Import the classes containing the parametrization and characteristics
         # of fluorophore, diffusion model, illumination, and detection.
@@ -148,6 +148,13 @@ class SystemS2:
         time_mod = np.insert(time_mod, 0, 0 )
         time_mod[-1] = np.max(time_lab)
 
+        # Restrict the eigenproblem to the even-l subspace: linear light-matter
+        # interaction couples only l1=0 and l1=2 (parity preserving) and the
+        # initial condition lives entirely at l=0, so the odd-l coefficients stay
+        # exactly zero for all time. Exact, not an approximation. (If an odd-l1
+        # process or a non-l=0 initial condition is ever added, pass keep_mask=None.)
+        keep_mask = (self._l % 2 == 0)
+
         # Solve evolution in every time window
         c = np.zeros((self.fluorophore.nspecies,
                       self._l.size,
@@ -169,7 +176,7 @@ class SystemS2:
             time_i = time_i - time_mod[i]
 
             # Solve the time evolution
-            c_i, _, _ = solve_evolution(M[i], c0, time_i, l=self._l)
+            c_i, _, _ = solve_evolution(M[i], c0, time_i, keep_mask=keep_mask)
 
             # Save results and update initial conditions for the next window
             c[:,:,time_sel] = c_i[:,:,:-1]
@@ -186,12 +193,12 @@ class SystemS2:
 
     def diffusion_kinetics_matrix(self):
         # Preliminary computations based on the illumination class.
-        # Photon flux product coefficients based on wigner3j symbols.
+        # Photon flux product coefficients from the real-SH product table.
         # F has dimensions: [nlansers, l_size, l_size].
         F, c_exc = self.illumination.photon_flux_prod_coeffs(
                                                     self._l,
                                                     self._m,
-                                                    self._wigner3j_prod_coeffs)
+                                                    self._sh_product_coeffs)
 
         # Compute the rotational diffusion matrix, it will not change with the
         # time windows of laser modulation.
@@ -260,9 +267,9 @@ def quantum_numbers(lmax):
 
 def real_sh_product_coeffs(l, m):
     # 3D table for the product of two real spherical harmonics (4pi norm):
-    #   w3jp[i,j,k] = coefficient of R_k in the product  R_i * R_j ,
+    #   table[i,j,k] = coefficient of R_k in the product  R_i * R_j ,
     # so that "multiply by a function g" becomes the matrix
-    #   F[k,j] = sum_i w3jp[i,j,k] * g_i      (see kinetic_prod_block).
+    #   F[k,j] = sum_i table[i,j,k] * g_i      (see kinetic_prod_block).
     #
     # The table is computed exactly by quadrature on a Driscoll-Healy grid:
     # synthesise R_i and R_j, multiply them pointwise, and analyse the product
@@ -282,7 +289,7 @@ def real_sh_product_coeffs(l, m):
     n = l.size
     lmax = int(np.max(l))
     grid_lmax = 2 * lmax + 2  # resolve products up to degree lmax+2 (no aliasing)
-    w3jp = np.zeros([n, n, n])
+    table = np.zeros([n, n, n])
 
     def synth(vec):
         cilm = sht.shio.SHVectorToCilm(vec)
@@ -304,190 +311,5 @@ def real_sh_product_coeffs(l, m):
     l1_allowed_indexes = np.arange(n)[np.logical_or(l == 0, l == 2)]
     for i in l1_allowed_indexes:
         for j in np.arange(n):
-            w3jp[i, j, :] = analyze(basis_grid[i] * basis_grid[j])
-    return w3jp
-
-# Backwards-compatible alias (the old name was a misnomer: see above, the table
-# is a real-SH product, not a bare Wigner-3j symbol).
-wigner_3j_prod_3darray = real_sh_product_coeffs
-
-################################################################################
-# Unused functions - still possibly useful
-################################################################################
-
-# def clebsch_gordan_prod_3darray(l, m):
-#     # Currently not used because slow
-#     # 3D array with all the clebsh gordan coefficients for sh multiplication
-#     n = l.size
-#     cgp = np.zeros([n, n, n])
-#     for i in np.arange(n):
-#         for j in np.arange(n):
-#             for k in np.arange(n):
-#                     cgp[i,j,k] = np.sqrt( (2*l[i] + 1) * (2*l[j] + 1) / 
-#                                         ( np.pi*4    * (2*l[k] + 1) ) ) * (
-#                                 sf.clebsch_gordan(l[i], 0,
-#                                                 l[j], 0,
-#                                                 l[k], 0) * 
-#                                 sf.clebsch_gordan(l[i], m[i],
-#                                                 l[j], m[j],
-#                                                 l[k], m[k])
-#                                 )
-    
-#     # Multiply constant due to normalization issues
-#     cgp = cgp*np.sqrt(4*np.pi) 
-#     return cgp
-
-# def kinetics_diffusion_matrix_lmax(Dvec, Kmatrix, lmax):
-#     # Create the full kinetic diffusion matrix expanded in sh staring 
-#     # from scratch.
-#     # In this routine the expansion in l,m are included.
-#     assert len(Dvec) == len(Kmatrix)
-#     # Compute quantum number arrays and cg coefficients
-#     # The main simplification is that linear light matter interaction 
-#     # limits l1 to 0 and 2.
-#     l, m = quantum_numbers(lmax)
-#     #TODO Compute only cg coefficients that are needed, partially done
-#     # cgp = clebsch_gordan_prod_3darray(l, m)
-#     cgp = wigner_3j_prod_3darray(l, m)
-
-#     ncoeff = l.size  # number of spherical harmonics expansion coefficients
-#     nspecies = len(Dvec)  # number of species
-
-#     M = np.array( [ [np.zeros([ncoeff,ncoeff])]*nspecies ]*nspecies )
-#     for i in range(nspecies):
-#         for j in range(nspecies):
-#             if i == j:
-#                 M[i,j] = isotropic_diffusion_block(l, m, Dvec[i])
-#             # Create blocks of the kinetic matrix rates
-#             else:
-#                 k = Kmatrix[i][j]
-#                 if np.size(k) == 1:
-#                     M[i,j] = np.eye(ncoeff).dot(k)
-#                 else:
-#                     M[i,j] = kinetic_prod_block(k, cgp)
-
-#     for i in range(nspecies):
-#         for j in range(nspecies):
-#             if i != j:
-#                 M[i,i] = M[i,i]-M[j,i]
-#     return M
-
-# def remove_odd_coeffs(M, c0, l):
-#     l_sel = l%2 == 0
-#     c0 = c0[:, l_sel]
-#     M = M[:, :, :, l_sel, l_sel]
-#     return M, c0
-
-# def add_odd_coeffs_zeros(M, c0, c, l):
-#     c0_out = np.zeros((c0.shape[0], l.size))
-#     c_out = np.zeros((c0.shape[0], l.size, c0.shape[2]))
-#     M_out = np.zeros((M.shape[0], M.shape[1], M.shape[2], l.size, l.size))
-#     l_sel = l%2 == 0
-#     c0_out[:,l_sel] = c0
-#     c_out[:,l_sel,:] = c
-#     M_out[:,:,:,l_sel,l_sel] = M
-#     return M_out, c0_out, c_out
-
-
-if __name__ == "__main__":
-    a = None
-    # from codetiming import Timer
-
-    # rsEGFP2 = NegativeSwitcher(cross_section_on_blue=1e-10,
-    #                            lifetime_on=3.6e-9,
-    #                            quantum_yield_on_to_off=0.001,
-    #                            diffusion_coefficient=1/(6*100e-6) )
-
-    # tau = 100e-6 # us anisotropy decay
-    # D = 1/(tau*6) # Hz
-    # yield_off = 0.001 
-    # tau_off = 80e-6 # time constant off switching
-    # tau_on_exc = 3.6e-9 # lifetime of excited state
-    # k21 = 1 / (tau_off * yield_off)
-    # k12 = 1 / tau_on_exc
-    # k32 = (1/tau_off) / yield_off
-
-    # lmax = 8
-    # omega = make_angles(lmax)
-    # k21a = (np.sin(omega[0])**2) * k21
-    # k21grid, k21c, k21cilm = make_grid(k21a, lmax)
-    # plot_proj(k21grid, clims=[])
-
-    # # Test product using cg coeff
-    # l, m = quantum_numbers(lmax)
-    # t = Timer()
-    # t.start()
-    # cgp = clebsch_gordan_prod_3darray(l, m)
-    # t.stop()
-    # # k21prod = kinetic_prod_block(k21c, cgp)
-    # # kp = np.cos(omega[0])**2 * np.cos(omega[1]+np.pi)**2
-    # # kpgrid, kpc = make_grid(kp, lmax)
-    # # k21kpc = k21prod.dot(kpc)
-    # # k21kpcilm = sht.shio.SHVectorToCilm(k21kpc)
-    # # k21kparray = sht.expand.MakeGridDH(k21kpcilm, sampling=2)
-    # # k21kpgrid = sht.shclasses.SHGrid.from_array(k21kparray)
-    # # k21kpgrid.plot3d()
-
-    # # Array with all the diffusion tensors/scalar for every specie.
-    # # In this case every specie diffuse with the same rate.
-    # Dvec = [D, D, D]
-
-    # # Array with kinetic constants connecting the states.
-    # Kmatrix = [[   0, k12, 0],
-    #            [k21a,   0, 0],
-    #            [   0, k32, 0]]
-
-
-    # # # Simplified kinetic scheme
-    # # # Array with all the diffusion tensors/scalar for every specie.
-    # # # In this case every specie diffuse with the same rate.
-    # # Dvec = [D, D]
-
-    # # # Array with kinetic constants connecting the states.
-    # # Kmatrix = [[   0,   0],
-    # #            [k21a,   0]]
-
-    # t = Timer()
-    # t.start()
-    # M = kinetics_diffusion_matrix(Dvec, Kmatrix, lmax)
-    # t.stop()
-
-    # # initial conditions
-    # c0a = omega[0]*0 +1
-    # c0grid, c0vec, c0cilm = make_grid(c0a, lmax)
-    # c0 = np.zeros(((lmax+1)**2,3))
-    # c0[:,0] = c0vec
-    # # p0_1 = 1 + np.cos(omega[0]) * 0
-    # # p0_1grid, c0_1 = make_grid(p0_1, lmax)
-    # # c0[:,0] =c0_1
-
-    # time = np.logspace(-11,-3,128)
-    # # time = np.linspace(0,1e-3,1000)
-    # t.start()
-    # c, L, U =solve_evolution(M, c0, time)
-    # t.stop()
-    # # plt.imshow(np.real(Dblock))
-    
-    # Uinv = np.linalg.inv(U)
-    # ci = np.matmul(U, np.diag(np.exp(L*100e-6)))
-    # ci = np.matmul(ci, Uinv)
-    # plt.imshow(np.real(ci))
-
-
-    # t.start()
-    # np.linalg.inv(U)
-    # t.stop()
-
-    # cplot = c[:,0,:]
-    # cplotgrid = vecs2grids(cplot)
-
-    # plt.figure()
-    # plt.plot(time, cplot.T)
-    # plt.xscale('log')
-
-    # plot_proj(cplotgrid[100])
-
-    # # cplotgrid[10].plot()
-    # # plt.imshow(M)
-    # # plt.show()
-    # # plt.imshow(cplotgrid[20].data, vmin=0, vmax=1)
+            table[i, j, :] = analyze(basis_grid[i] * basis_grid[j])
+    return table

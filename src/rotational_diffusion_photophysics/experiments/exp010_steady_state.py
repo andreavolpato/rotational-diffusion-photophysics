@@ -73,7 +73,7 @@ class experiment:
     det_pol: tuple = ('x', 'y')   # cross-polarized detection channels
     na: float = 0.75              # numerical aperture
     ri: float = 1.000             # refractive index of immersion medium
-    lmax: int = 10                # spherical-harmonics cutoff
+    lmax: int = 6                 # spherical-harmonics cutoff
     # --- pulse scheme (phase durations as fractions of total_time) ---
     total_time: float = 2.0          # total experiment duration [s]
     phase1_fraction: float = 0.5     # fraction of total_time spent in phase 1 (488 only)
@@ -148,7 +148,7 @@ class experiment:
             illumination=lasers,
             detection=detection,
             lmax=self.lmax,
-            representation='s2',
+            representation='so3',
         )
 
     def run(self) -> results:

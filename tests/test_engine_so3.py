@@ -86,8 +86,9 @@ def test_free_diffusion_decay(lval, rate_factor, reduce_even):
     c0[0, il] = a0       # some rank-l content
 
     time = np.linspace(0.0, 5e-5, 50)
-    l_arg = l if reduce_even else None
-    c, _, _ = core.solve_evolution(M, c0, time, l=l_arg, real_output=False)
+    keep_mask = (l % 2 == 0) if reduce_even else None
+    c, _, _ = core.solve_evolution(M, c0, time, keep_mask=keep_mask,
+                                   real_output=False)
 
     assert c.shape == (1, ncoeff, time.size)
     # l=0 population conserved.
@@ -302,11 +303,10 @@ def test_reduction_full_system_signals_match_s2():
     from rotational_diffusion_photophysics.engine_s2 import SystemS2 as S2System
 
     fl = _rsegfp2_4state(0.0)            # cis == trans -> no reorientation
-    # Non-saturating activation: l<=2 is exact, the regime where the two engines
-    # provably agree. (They DIFFER under strong/saturating excitation -- a real,
-    # lmax-converged discrepancy, documented in a40 n030; SO(3)'s operators are
-    # rigorously verified, the S^2 w3jp has empirical factors -> needs the MC
-    # oracle to settle which is correct.)
+    # Non-saturating activation keeps this test cheap (l<=2). The two engines now
+    # also agree under SATURATION at equal dipoles, after the S^2 real-SH product
+    # bug was fixed (a40 n030 sec.13); the old comment here ("they diverge, build
+    # the MC oracle") referred to that bug.
     diff, lasers, det = _starss1_spec(fl, power_scale=1e-3)
     s2 = S2System(fluorophore=fl, diffusion=diff, illumination=lasers,
                   detection=det, lmax=2)
@@ -316,6 +316,47 @@ def test_reduction_full_system_signals_match_s2():
     sig2 = s2.detector_signals(t)
     sig3 = so3.detector_signals(t)
     np.testing.assert_allclose(sig3, sig2, rtol=1e-5, atol=1e-12)
+
+
+def test_even_m_reduction_is_exact_under_saturation():
+    # The even-m eigenproblem reduction (drop odd lab-order coefficients) must be
+    # EXACT, including under strong saturation and with reorienting dipoles, for
+    # the implemented even-lab-order optics (x/y/z linear + circular). Guards both
+    # the speed reduction and the m-parity argument (n030 sec.14): if a future
+    # field with odd lab order is added without setting even_m_reduction=False,
+    # this comparison against the full (unreduced) solve will break.
+    pytest.importorskip("spherical")
+    fl = _rsegfp2_4state(35.0)                 # reorienting dipole (cis 35deg)
+    diff, lasers, det = _starss1_spec(fl, power_scale=1.0)   # saturating
+    t = np.linspace(0, 1e-3, 20)
+    full = SystemSO3(fluorophore=fl, diffusion=diff, illumination=lasers,
+                     detection=det, lmax=4, even_m_reduction=False)
+    reduced = SystemSO3(fluorophore=fl, diffusion=diff, illumination=lasers,
+                        detection=det, lmax=4, even_m_reduction=True)
+    # Exact up to LAPACK rounding (the reduced/full eig run different-sized
+    # matrices, so they differ only at ~1e-10, far below any physical signal).
+    np.testing.assert_allclose(reduced.detector_signals(t),
+                               full.detector_signals(t), rtol=1e-5, atol=1e-9)
+
+
+def test_real_eig_matches_complex_eig_under_saturation():
+    # The real-eig optimization (realifying unitary transform -> real arithmetic
+    # eig) must reproduce the complex-eig path exactly, including under saturation
+    # and with reorienting dipoles. Guards the transform / its reality phase
+    # (n030 sec.14): a wrong phase would either fail the internal realify check
+    # (silent fallback, still correct) or, if it slipped through, change results
+    # -- this catches the latter.
+    pytest.importorskip("spherical")
+    fl = _rsegfp2_4state(35.0)                 # reorienting dipole (cis 35deg)
+    diff, lasers, det = _starss1_spec(fl, power_scale=1.0)   # saturating
+    t = np.linspace(0, 1e-3, 20)
+    complex_eig = SystemSO3(fluorophore=fl, diffusion=diff, illumination=lasers,
+                            detection=det, lmax=4, real_eig=False)
+    real_eig = SystemSO3(fluorophore=fl, diffusion=diff, illumination=lasers,
+                         detection=det, lmax=4, real_eig=True)
+    np.testing.assert_allclose(real_eig.detector_signals(t),
+                               complex_eig.detector_signals(t),
+                               rtol=1e-5, atol=1e-9)
 
 
 def test_core_system_selector():

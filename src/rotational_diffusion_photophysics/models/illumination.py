@@ -34,7 +34,7 @@ class SingleLaser:
         self.time0 = 0
         return None
 
-    def photon_flux_prod_coeffs(self, l, m, wigner_3j_prod_coeffs):
+    def photon_flux_prod_coeffs(self, l, m, sh_product_coeffs):
         # Compute the prod_matrix for the angular dependence of the photon flux.
         # When the photon flux is multiplied by the absorbtion cross-section
         # the kinetic rate of absortion is obtained.
@@ -48,7 +48,7 @@ class SingleLaser:
         # Return the matrix F as a 3 dimensional array, this will be helpfull
         # when more than one laser is used to excite the sample.
         F = np.zeros((1, l.size, l.size))
-        F[0] = kinetic_prod_block(c_exc[0], wigner_3j_prod_coeffs)
+        F[0] = kinetic_prod_block(c_exc[0], sh_product_coeffs)
         return F, c_exc
 
 class ModulatedLasers:
@@ -84,7 +84,7 @@ class ModulatedLasers:
 
         return None
 
-    def photon_flux_prod_coeffs(self, l, m, wigner_3j_prod_coeffs):
+    def photon_flux_prod_coeffs(self, l, m, sh_product_coeffs):
         # Compute the prod_matrix for the angular dependence of the photon flux.
         # When the photon flux is multiplied by the absorbtion cross-section
         # the kinetic rate of absortion is obtained.
@@ -101,7 +101,7 @@ class ModulatedLasers:
                     refractive_index = self.refractive_index,
                     ) * self.photon_flux[i]
             F[i] = kinetic_prod_block(c_exc[i], 
-                        wigner_3j_prod_coeffs)
+                        sh_product_coeffs)
 
         # F is a 3 dimensional array. The firt index is for the lasers, the last
         # indexes are for lm of SH.

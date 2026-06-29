@@ -207,6 +207,42 @@ def na_corrected_absorption_coeffs(l, m, n, polarization, dipole_direction,
     raise ValueError(f"unknown polarization '{polarization}'")
 
 
+def realifying_transform(l, m, n, keep_mask=None):
+    """Unitary T (angular block) mapping the *complex* Wigner-D coefficients of a
+    REAL density to real numbers, so that ``T M T^H`` is real and the eig can run
+    in real (dgeev) instead of complex (zgeev) arithmetic (~2x; see
+    ``core.solve_evolution``). A real function on SO(3) has coefficients obeying
+    ``c_{l,-m,-n} = (-1)^{m-n} conj(c_{lmn})``; pairing (m,n)<->(-m,-n) with that
+    phase gives the standard cos/sin real combination. Built over the kept angular
+    basis (``keep_mask``, or all coefficients if None). Returns the angular
+    unitary, or None if that basis is not closed under (m,n)->(-m,-n) (then the
+    caller keeps the complex eig). This is SO(3) physics (the Wigner-D reality
+    constraint), hence it lives here, not in the basis-agnostic core."""
+    ang = np.arange(l.size) if keep_mask is None else np.nonzero(keep_mask)[0]
+    la, ma, na = l[ang], m[ang], n[ang]
+    ka = ang.size
+    pos = {(int(la[a]), int(ma[a]), int(na[a])): a for a in range(ka)}
+    T = np.zeros((ka, ka), dtype=complex)
+    done = np.zeros(ka, dtype=bool)
+    r2 = 1.0 / np.sqrt(2.0)
+    for a in range(ka):
+        if done[a]:
+            continue
+        partner = pos.get((int(la[a]), -int(ma[a]), -int(na[a])))
+        if partner is None:
+            return None                      # basis not closed -> cannot realify
+        if partner == a:
+            T[a, a] = 1.0                     # self-paired (m=n=0): already real
+            done[a] = True
+        else:
+            i, j = (a, partner) if a < partner else (partner, a)
+            ei = (-1.0) ** (int(ma[i]) - int(na[i]))
+            T[i, i] = r2;        T[i, j] = ei * r2
+            T[j, i] = -1j * r2;  T[j, j] = 1j * ei * r2
+            done[i] = done[j] = True
+    return T
+
+
 class SystemSO3:
     """SO(3) Wigner-D engine: rotational diffusion + photophysics with a
     per-state body-frame transition dipole (engine A, a40 n030).
@@ -225,18 +261,39 @@ class SystemSO3:
     """
 
     def __init__(self, fluorophore, diffusion, illumination, detection=None,
-                 lmax=2):
+                 lmax=2, even_m_reduction=True, real_eig=True):
         import spherical
         self.fluorophore = fluorophore
         self.diffusion = diffusion
         self.illumination = illumination
         self.detection = detection
         self.lmax = lmax
+        # Drop odd lab-order (m) coefficients from the eigenproblem (exact for the
+        # implemented even-lab-order optics; ~4-5x faster). Disable for fields with
+        # odd lab order (out-of-xy-plane-tilted linear, or elliptical/rotating),
+        # which populate m = +-1. See core.System docstring and n030 sec.14.
+        self.even_m_reduction = even_m_reduction
+        # Run the eig in real arithmetic via a unitary realifying transform of the
+        # (complex) Wigner-D matrix (~2x on the dominant eig; exact, with a
+        # self-check + complex fallback). See core.solve_evolution / n030 sec.14.
+        self.real_eig = real_eig
 
         self.l, self.m, self.n = quantum_numbers_so3(lmax)
         self.wigner = spherical.Wigner(lmax)
         self._i000 = int(np.nonzero(
             (self.l == 0) & (self.m == 0) & (self.n == 0))[0][0])
+
+        # Precompute the parity-reduction mask and the realifying transform once
+        # (they depend only on the basis, not on M). Engine physics: linear/
+        # circular light-matter is parity-preserving, so starting from (l,m)=(0,0)
+        # only the even-l (and, for even-lab-order optics, even-m) subspace is ever
+        # reached -- exact, see n030 sec.14. core.solve_evolution just applies them.
+        self._keep_mask = (self.l % 2 == 0)
+        if even_m_reduction:
+            self._keep_mask = self._keep_mask & (self.m % 2 == 0)
+        self._transform = (realifying_transform(self.l, self.m, self.n,
+                                                self._keep_mask)
+                           if real_eig else None)
         return None
 
     def _absorption_operators(self):
@@ -315,7 +372,9 @@ class SystemSO3:
         for i in range(nwindows):
             sel = np.logical_and(time_lab >= time_mod[i], time_lab <= time_mod[i + 1])
             ti = np.append(time_lab[sel], time_mod[i + 1]) - time_mod[i]
-            ci, _, _ = solve_evolution(M[i], c0, ti, l=self.l, real_output=False)
+            ci, _, _ = solve_evolution(M[i], c0, ti, keep_mask=self._keep_mask,
+                                       transform=self._transform,
+                                       real_output=False)
             c[:, :, sel] = ci[:, :, :-1]
             c0 = ci[:, :, -1]
         self._c = c

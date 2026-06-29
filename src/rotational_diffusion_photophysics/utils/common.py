@@ -163,7 +163,9 @@ def vec2grid(cvec, lmax=32):
 # Spherical harmonics coefficients operations
 ################################################################################
 
-def kinetic_prod_block(kvec, cgp):
-    # Create a kinetic constant block for multiplication using cg coeffs.
-    kblock = np.transpose(cgp, [2, 1, 0]).dot(kvec)
+def kinetic_prod_block(kvec, prod_coeffs):
+    # Build the "multiply by the function kvec" operator from the real-SH product
+    # table prod_coeffs (prod_coeffs[i,j,k] = coeff of R_k in R_i*R_j):
+    #   block[k,j] = sum_i prod_coeffs[i,j,k] * kvec[i].
+    kblock = np.transpose(prod_coeffs, [2, 1, 0]).dot(kvec)
     return kblock
