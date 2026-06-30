@@ -365,8 +365,16 @@ class SystemSO3:
         time_windows = np.atleast_1d(ill.time_windows).astype(float)
         nwindows = M.shape[0]
 
-        c0 = np.zeros((ns, ncoeff), dtype=complex)
-        c0[:, self._i000] = self.fluorophore.starting_populations
+        # Initial orientational distribution per species: the diffusion model's
+        # equilibrium if it defines one (e.g. an ordering potential -> the aligned
+        # sample starts at c_eq, no quench; n020 M2.5), else isotropic ((0,0,0)).
+        starting_populations = np.asarray(self.fluorophore.starting_populations)
+        if hasattr(self.diffusion, "equilibrium_coeffs_so3"):
+            ceq = self.diffusion.equilibrium_coeffs_so3(self.l, self.m, self.n)
+            c0 = np.outer(starting_populations, ceq).astype(complex)
+        else:
+            c0 = np.zeros((ns, ncoeff), dtype=complex)
+            c0[:, self._i000] = starting_populations
 
         time_lab = time + ill.time0
         time_mod = np.cumsum(time_windows)

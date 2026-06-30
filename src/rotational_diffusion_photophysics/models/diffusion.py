@@ -83,11 +83,21 @@ class OrderingPotentialDiffusion:
 
         U(theta)/kT = -lam * P2(cos theta),
 
-    i.e. the transition-dipole axis wobbles in a soft "cone" whose tightness is
-    set by the order strength ``lam`` (a50 n010/n020). The equilibrium dipole
-    distribution is c_eq ~ exp(lam P2); the second-rank order parameter
-    S2 = <P2>_eq and the residual (plateau) anisotropy is r_inf = r0 * S2^2.
-    ``lam = 0`` recovers free isotropic diffusion exactly.
+    i.e. the transition-dipole axis is ordered relative to the director (theta from
+    the director). The order strength and SIGN are set by ``lam`` (a50 n010/n020):
+
+      lam > 0 : "prolate" / along-director order -- dipoles align WITH the director
+                (wobble in a cone about it). S2 = <P2>_eq in (0, 1].
+      lam = 0 : free isotropic diffusion (recovered exactly).
+      lam < 0 : "oblate" / in-plane order -- dipoles lie in the plane PERPENDICULAR
+                to the director (repelled from it, e.g. a dye lying in the membrane
+                plane while the director is the membrane normal). S2 in [-1/2, 0).
+
+    The equilibrium dipole distribution is c_eq ~ exp(lam P2); the second-rank order
+    parameter S2 = <P2>_eq (positive prolate, negative oblate) and the residual
+    (plateau) anisotropy is r_inf = r0 * S2^2 (>= 0 for either sign). Limits:
+    lam -> +inf gives S2 -> 1 (fully along director); lam -> -inf gives S2 -> -1/2
+    (fully in-plane).
 
     This subsumes wobbling-in-cone / Lipari-Szabo / MOMD / the strong-ordering
     limit of SRLS in a single operator (n010).
@@ -104,26 +114,77 @@ class OrderingPotentialDiffusion:
     *macroscopically aligned* sample must START at c_eq (n020 M2.5), else the dark
     dynamics show a spurious isotropic->c_eq quench. For an isotropic ensemble
     (vesicles) use the Plan-A analytic anisotropy multiplier instead. l_max must
-    grow with ``lam`` (n020 M0 result): ~8 for lam<=2, ~20 for lam=5.
+    grow with |lam| (n020 M0): ~8 for lam<=2, ~20 for lam=5; STRONG in-plane order
+    (lam very negative) concentrates c_eq into an equatorial ring and needs even
+    higher l_max (e.g. lam=-8 is not converged by l_max=14) -- use moderate |lam| or
+    the symmetrized (psi-space) form for tight oblate order.
     """
 
     def __init__(self,
                  diffusion_coefficient=14e-9,  # GFP rotational diffusion [Hz]
                  lam=0.0,                       # ordering strength (Maier-Saupe)
+                 director=(0.0, 0.0),           # (theta, phi) of the ordering axis [rad]
                  ):
         self.diffusion_coefficient = diffusion_coefficient
         self.lam = lam
+        # Lab-frame orientation (theta, phi) of the preferred-alignment axis
+        # (the director, e.g. the membrane normal). Default (0,0) = along lab-z (the
+        # optical axis). For an ISOTROPIC ensemble the anisotropy decay is
+        # rotation-invariant -> the director is irrelevant; it matters for a
+        # MACROSCOPICALLY ALIGNED sample (oriented membrane), where it sets the
+        # equilibrium's lab orientation and hence the polarized signal levels. A
+        # tilted director makes the potential non-axial (m != 0): on S^2 the even-l
+        # reduction still holds; on SO(3) it breaks even-m (use even_m_reduction=False).
+        self.director = director
 
     def diffusion_matrix(self, l, m, nspecies):
-        block = ordering_potential_block(l, m, self.diffusion_coefficient, self.lam)
+        block = ordering_potential_block(l, m, self.diffusion_coefficient, self.lam,
+                                         self.director)
+        return np.repeat(block[None, :, :], nspecies, axis=0)
+
+    def diffusion_matrix_so3(self, l, m, n, nspecies):
+        """SO(3) (Wigner-D) blocks of the same ordering potential, restricting a
+        body axis to the lab director (U/kT = -lam P2(cos beta), beta = polar Euler
+        angle). Built like the S^2 case (Gamma = T+ L~ T-) but with the exact
+        complex-Wigner-D product (engine_so3.multiplication_operator via CG): the
+        beta-only V_eff and c_eq^{+-1/2} factors enter as (L, 0, 0) coefficients,
+        coupling l (Delta l <= +-4) while preserving m and n. For a dipole along the
+        body axis (n=0) this reduces to the S^2 operator; the n!=0 couplings (via the
+        body-index CG) are the genuinely-SO(3) content, relevant when the dipole
+        reorients within an ordered barrel. Needs a higher l_max than S^2 (the
+        T+ L~ T- construction; ~12 for lam=2)."""
+        from rotational_diffusion_photophysics.engine_so3 import multiplication_operator
+        lmax = int(np.max(l))
+        Dr, lam = self.diffusion_coefficient, self.lam
+        a0, a2, a4 = 3 * lam**2 / 10, 3 * lam**2 / 14 - 3 * lam, -18 * lam**2 / 35
+        cV = _beta_wignerd_coeffs({0: a0, 2: a2, 4: a4}, l, m, n)
+        Ltilde = (np.diag((-Dr * l * (l + 1)).astype(complex))
+                  - Dr * multiplication_operator(l, m, n, cV, lmax))
+        Tplus = multiplication_operator(l, m, n, _beta_wignerd_coeffs(
+            _legendre_coeffs(lambda x: np.exp(lam * _P2(x) / 2), lmax), l, m, n), lmax)
+        Tminus = multiplication_operator(l, m, n, _beta_wignerd_coeffs(
+            _legendre_coeffs(lambda x: np.exp(-lam * _P2(x) / 2), lmax), l, m, n), lmax)
+        block = Tplus @ Ltilde @ Tminus
         return np.repeat(block[None, :, :], nspecies, axis=0)
 
     def equilibrium_coeffs(self, l, m):
         """SH coefficients of the equilibrium dipole distribution c_eq ~ exp(lam P2),
-        normalized so the l=0 (population) coefficient is 1. This is the operator's
-        null mode; use it as the initial condition for an aligned sample (n020 M2.5)."""
-        c = _axial_coeffs(lambda x: np.exp(self.lam * _P2(x)), l, m)
+        oriented along the director, normalized so the (l=0,m=0) (population)
+        coefficient is 1. The operator's null mode; the aligned-sample IC (n020 M2.5)."""
+        if self.director[0] == 0.0:
+            c = _axial_coeffs(lambda x: np.exp(self.lam * _P2(x)), l, m)
+        else:
+            c = _oriented_coeffs(lambda x: np.exp(self.lam * _P2(x)), l, m, self.director)
         return c / c[np.logical_and(l == 0, m == 0)][0]
+
+    def equilibrium_coeffs_so3(self, l, m, n):
+        """Wigner-D coefficients of the SO(3) equilibrium c_eq ~ exp(lam P2(cos beta))
+        at (l, 0, 0), normalized so the (0,0,0) (population) coefficient is 1. The
+        operator's null mode -> the aligned-sample initial condition (n020 M2.5)."""
+        c = _beta_wignerd_coeffs(
+            _legendre_coeffs(lambda x: np.exp(self.lam * _P2(x)), int(np.max(l))),
+            l, m, n)
+        return c / c[np.logical_and.reduce((l == 0, m == 0, n == 0))][0]
 
     def order_parameter(self, ngauss=256):
         """Second-rank order parameter S2 = <P2>_eq (Maier-Saupe), c_eq ~ exp(lam P2)."""
@@ -151,74 +212,71 @@ def _axial_coeffs(func, l, m, ngauss=256):
     return c
 
 
-def ordering_potential_block(l, m, diffusion_coefficient, lam):
-    # Bare Smoluchowski operator Gamma = T+ . L~ . T- for U/kT = -lam P2 (see
-    # OrderingPotentialDiffusion). Exact analytic V_eff coefficients; the
-    # c_eq^{+-1/2} factors via Gauss-Legendre projection.
+def _legendre_coeffs(func, lmax, ngauss=256):
+    # Legendre coefficients g_L of a function func(x) of x=cos(beta):
+    #   func = sum_L g_L P_L,  g_L = (2L+1)/2 int_{-1}^1 func P_L dx.
+    from numpy.polynomial.legendre import leggauss
+    from scipy.special import eval_legendre
+    xg, wg = leggauss(ngauss)
+    fx = func(xg)
+    return {L: (2 * L + 1) / 2 * np.sum(wg * fx * eval_legendre(L, xg))
+            for L in range(lmax + 1)}
+
+
+def _beta_wignerd_coeffs(gL, l, m, n):
+    # Wigner-D coefficients of a beta-only function g(beta) = sum_L g_L P_L(cos beta).
+    # Since D^L_{0,0}(a,beta,c) = P_L(cos beta), the coefficients sit at (L, 0, 0).
+    c = np.zeros(l.size, dtype=complex)
+    for i in range(l.size):
+        if m[i] == 0 and n[i] == 0:
+            c[i] = gL.get(int(l[i]), 0.0)
+    return c
+
+
+def _P4(x):
+    return (35 * x**4 - 30 * x**2 + 3) / 8
+
+
+def _oriented_coeffs(func, l, m, director):
+    # 4pi real-SH coefficients of func(cos gamma), gamma = angle to the director
+    # (theta_d, phi_d): cos gamma = cos th cos th_d + sin th sin th_d cos(ph - ph_d).
+    # Evaluated on a Driscoll-Healy grid and expanded (same pyshtools/'4pi' csphase=1
+    # convention as sh_multiplication_operator). Reduces to _axial_coeffs at director
+    # (0,0). A tilted director populates m != 0 (still even-l for an even func).
+    import pyshtools as sht
+    theta_d, phi_d = director
+    lmax = int(np.max(l))
+    grid = sht.SHGrid.from_zeros(lmax=2 * lmax + 2, kind='real')
+    th = np.radians(90.0 - grid.lats())[:, None]   # colatitude
+    ph = np.radians(grid.lons())[None, :]
+    cosg = (np.cos(th) * np.cos(theta_d)
+            + np.sin(th) * np.sin(theta_d) * np.cos(ph - phi_d))
+    grid.data = func(cosg)
+    cilm = grid.expand(normalization='4pi', csphase=1)
+    return sht.shio.SHCilmToVector(cilm.coeffs, lmax)
+
+
+def ordering_potential_block(l, m, diffusion_coefficient, lam, director=(0.0, 0.0)):
+    # Bare Smoluchowski operator Gamma = T+ . L~ . T- for U/kT = -lam P2(cos gamma),
+    # gamma measured from the director (see OrderingPotentialDiffusion). For an axial
+    # director (theta_d=0) the V_eff coefficients are exact analytic (m=0); a tilted
+    # director uses the grid expansion (m != 0), the V_eff is the same P0/P2/P4 but
+    # oriented along the director.
     Dr = diffusion_coefficient
-    # V_eff = a0 P0 + a2 P2 + a4 P4  ->  SH coeff of P_l is a_l / sqrt(2l+1).
     a0, a2, a4 = 3 * lam**2 / 10, 3 * lam**2 / 14 - 3 * lam, -18 * lam**2 / 35
-    cV = np.zeros(l.size)
-    cV[np.logical_and(l == 0, m == 0)] = a0
-    cV[np.logical_and(l == 2, m == 0)] = a2 / np.sqrt(5)
-    cV[np.logical_and(l == 4, m == 0)] = a4 / 3.0    # sqrt(2*4+1) = 3
+    if director[0] == 0.0:
+        # V_eff = a0 P0 + a2 P2 + a4 P4 -> 4pi-SH coeff of P_l is a_l / sqrt(2l+1).
+        cV = np.zeros(l.size)
+        cV[np.logical_and(l == 0, m == 0)] = a0
+        cV[np.logical_and(l == 2, m == 0)] = a2 / np.sqrt(5)
+        cV[np.logical_and(l == 4, m == 0)] = a4 / 3.0    # sqrt(2*4+1) = 3
+        cTp = _axial_coeffs(lambda x: np.exp(lam * _P2(x) / 2), l, m)
+        cTm = _axial_coeffs(lambda x: np.exp(-lam * _P2(x) / 2), l, m)
+    else:
+        cV = _oriented_coeffs(lambda x: a0 + a2 * _P2(x) + a4 * _P4(x), l, m, director)
+        cTp = _oriented_coeffs(lambda x: np.exp(lam * _P2(x) / 2), l, m, director)
+        cTm = _oriented_coeffs(lambda x: np.exp(-lam * _P2(x) / 2), l, m, director)
     Ltilde = np.diag(-Dr * l * (l + 1)) - Dr * sh_multiplication_operator(cV, l, m)
-    Tplus = sh_multiplication_operator(
-        _axial_coeffs(lambda x: np.exp(lam * _P2(x) / 2), l, m), l, m)
-    Tminus = sh_multiplication_operator(
-        _axial_coeffs(lambda x: np.exp(-lam * _P2(x) / 2), l, m), l, m)
+    Tplus = sh_multiplication_operator(cTp, l, m)
+    Tminus = sh_multiplication_operator(cTm, l, m)
     return Tplus @ Ltilde @ Tminus
-
-
-################################################################################
-# Analytic two-component (wobble + global) anisotropy (a50 n020)
-################################################################################
-# A closed-form anisotropy decay for the common ISOTROPIC ENSEMBLE (vesicles,
-# cells): a fast restricted wobble that loses anisotropy down to a plateau set by
-# the order parameter S, riding on slow uncoupled global tumbling. This is the
-# wobbling-in-cone / Lipari-Szabo result (they are the same rank-2 expression,
-# n010); it is NOT a diffusion operator, just a multiplier on the rank-2 channel,
-# so it is the cheapest model and the right tool for quick simulations. Validity:
-# timescale separation (wobble fast vs global) + isotropic global tumbling; it
-# cannot couple to photophysics during a pulse (use OrderingPotentialDiffusion for
-# that). For a macroscopically aligned sample use the operator instead -- Plan A
-# assumes the r0 baseline of an isotropic ensemble.
-
-
-def two_component_anisotropy(time, r0=0.4, order_parameter=1.0,
-                             wobble_time=np.inf, global_diffusion=0.0):
-    """Time-resolved anisotropy of a fast wobble + slow global tumbling:
-
-        r(t) = r0 * [ (1 - S^2) exp(-t / tau_w) + S^2 ] * exp(-6 D_g t)
-
-    Parameters
-    ----------
-    time : array        times [s]
-    r0 : float          fundamental anisotropy at t=0 (0.4 for collinear abs/em).
-    order_parameter : S second-rank order parameter in [0, 1]; residual (plateau)
-                        anisotropy is r_inf = r0 S^2 (when D_g = 0). S=1 rigid
-                        (no wobble loss), S=0 free internal wobble.
-    wobble_time : tau_w fast internal (wobble) correlation time [s]; np.inf = rigid.
-    global_diffusion :  global isotropic rotational diffusion coefficient D_g [Hz];
-                        the slow tumble multiplies in as exp(-6 D_g t).
-
-    The order parameter relates to a wobbling cone of semi-angle theta_c by
-    S = 1/2 cos(theta_c)(1 + cos(theta_c)) (see order_parameter_from_cone_angle).
-    """
-    time = np.asarray(time, dtype=float)
-    s2 = order_parameter**2
-    wobble = (1.0 - s2) * np.exp(-time / wobble_time) + s2
-    return r0 * wobble * np.exp(-6.0 * global_diffusion * time)
-
-
-def order_parameter_from_cone_angle(cone_angle_deg):
-    """Wobbling-in-cone order parameter S = 1/2 cos(thc)(1 + cos(thc)) (Kinosita
-    1977). thc=0 -> S=1 (rigid); thc=90 deg -> S=0 (free)."""
-    c = np.cos(np.radians(cone_angle_deg))
-    return 0.5 * c * (1.0 + c)
-
-
-def cone_angle_from_order_parameter(order_parameter):
-    """Inverse of order_parameter_from_cone_angle: cos(thc) = (-1 + sqrt(1+8S))/2."""
-    c = (-1.0 + np.sqrt(1.0 + 8.0 * np.asarray(order_parameter, dtype=float))) / 2.0
-    return np.degrees(np.arccos(np.clip(c, -1.0, 1.0)))

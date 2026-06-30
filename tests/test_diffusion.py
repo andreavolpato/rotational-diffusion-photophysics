@@ -13,8 +13,7 @@ from rotational_diffusion_photophysics.engine_s2 import (
 from rotational_diffusion_photophysics.engine_so3 import quantum_numbers_so3
 from rotational_diffusion_photophysics.models.diffusion import (
     IsotropicDiffusion, OrderingPotentialDiffusion, ordering_potential_block,
-    two_component_anisotropy, order_parameter_from_cone_angle,
-    cone_angle_from_order_parameter, AnisotropicDiffusion,
+    AnisotropicDiffusion,
 )
 from rotational_diffusion_photophysics.utils.common import (
     kinetic_prod_block, sh_multiplication_operator, linear_light_matter_coeffs,
@@ -96,6 +95,27 @@ def test_order_parameter(lam, expected):
     assert abs(s2 - expected) < 1e-3
 
 
+def test_in_plane_ordering_negative_lambda():
+    # lam < 0 -> oblate / in-plane order: S2 negative, in [-1/2, 0); the limits are
+    # S2 -> +1 (lam->+inf, along director) and S2 -> -1/2 (lam->-inf, in-plane).
+    assert OrderingPotentialDiffusion(lam=-2.0).order_parameter() < 0
+    assert -0.5 < OrderingPotentialDiffusion(lam=-2.0).order_parameter() < 0
+    assert OrderingPotentialDiffusion(lam=-50.0).order_parameter() < -0.48   # -> -1/2
+    assert OrderingPotentialDiffusion(lam=+50.0).order_parameter() > 0.97    # -> +1
+
+
+def test_in_plane_operator_null_mode():
+    # The operator works for in-plane ordering too (moderate |lam| converges).
+    l, m = quantum_numbers(14)
+    model = OrderingPotentialDiffusion(1.0, lam=-2.0)
+    G = model.diffusion_matrix(l, m, 1)[0]
+    ceq = model.equilibrium_coeffs(l, m)
+    assert np.linalg.norm(G @ ceq) / np.linalg.norm(ceq) < 1e-3
+    # equilibrium is oblate: its l=2,m=0 coefficient (the alignment) is NEGATIVE.
+    i20 = np.nonzero((l == 2) & (m == 0))[0][0]
+    assert ceq[i20] < 0
+
+
 @pytest.mark.parametrize("lam,lmax", [(2.0, 16)])
 def test_rank2_anisotropy_decays_to_plateau(lam, lmax):
     # M2: the rank-2 correlation C2(t)=<P2(mu0.mu_t)>, propagated by the engine,
@@ -118,52 +138,6 @@ def test_rank2_anisotropy_decays_to_plateau(lam, lmax):
     c2 = total / total[0]
     assert abs(c2[0] - 1.0) < 1e-9
     assert abs(c2[1] - model.order_parameter()**2) < 1e-4
-
-
-# ---------------------------------------------------------------------------
-# Plan A: analytic two-component (wobble + global) anisotropy
-# ---------------------------------------------------------------------------
-def test_two_component_anisotropy_initial_value():
-    t = np.linspace(0, 1e-3, 10)
-    r = two_component_anisotropy(t, r0=0.4, order_parameter=0.6,
-                                 wobble_time=1e-5, global_diffusion=1e3)
-    assert abs(r[0] - 0.4) < 1e-12          # r(0) = r0 regardless of S, tau, D_g
-
-
-def test_two_component_rigid_limit_is_pure_global():
-    # S = 1 (rigid internal): r(t) = r0 exp(-6 D_g t), no wobble term.
-    t = np.linspace(0, 2e-3, 20)
-    Dg = 800.0
-    r = two_component_anisotropy(t, r0=0.4, order_parameter=1.0,
-                                 wobble_time=1e-6, global_diffusion=Dg)
-    np.testing.assert_allclose(r, 0.4 * np.exp(-6 * Dg * t), atol=1e-12)
-
-
-def test_two_component_plateau_is_r0_S2():
-    # D_g = 0: anisotropy decays to the residual plateau r_inf = r0 S^2.
-    S = 0.7
-    r = two_component_anisotropy(np.array([1e9]), r0=0.4, order_parameter=S,
-                                 wobble_time=1e-6, global_diffusion=0.0)
-    assert abs(r[0] - 0.4 * S**2) < 1e-9
-
-
-def test_cone_angle_order_parameter_roundtrip():
-    assert abs(order_parameter_from_cone_angle(0.0) - 1.0) < 1e-12     # rigid
-    assert abs(order_parameter_from_cone_angle(90.0) - 0.0) < 1e-12    # free
-    for thc in (10.0, 35.0, 60.0, 80.0):
-        S = order_parameter_from_cone_angle(thc)
-        np.testing.assert_allclose(cone_angle_from_order_parameter(S), thc, atol=1e-6)
-
-
-def test_planA_shares_exact_plateau_with_operator():
-    # The "A reproduces B" connection (n020 M4): Plan A's plateau r0 S^2, with S the
-    # Maier-Saupe order parameter of the operator, equals the operator's residual
-    # anisotropy r0 * C2(inf) exactly (C2(inf) = S^2, proved in M2 / s020).
-    lam = 2.0
-    S = OrderingPotentialDiffusion(lam=lam).order_parameter()
-    plateau_A = two_component_anisotropy(np.array([1e9]), r0=0.4, order_parameter=S,
-                                         wobble_time=1.0, global_diffusion=0.0)[0]
-    assert abs(plateau_A - 0.4 * S**2) < 1e-12
 
 
 # ---------------------------------------------------------------------------
@@ -279,3 +253,80 @@ def test_anisotropic_engine_reduces_to_isotropic():
     iso = SystemSO3(fl, IsotropicDiffusion(D), las, det, lmax=4).detector_signals(t)
     ani = SystemSO3(fl, AnisotropicDiffusion(D, D), las, det, lmax=4).detector_signals(t)
     np.testing.assert_allclose(ani, iso, rtol=1e-9, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# SO(3) ordering potential (the genuinely-SO(3) ordering operator)
+# ---------------------------------------------------------------------------
+def test_so3_ordering_reduces_to_isotropic_at_zero_lambda():
+    l, mm, n = quantum_numbers_so3(4)
+    iso = IsotropicDiffusion(2.5).diffusion_matrix_so3(l, mm, n, 1)[0]
+    op = OrderingPotentialDiffusion(2.5, lam=0.0).diffusion_matrix_so3(l, mm, n, 1)[0]
+    np.testing.assert_allclose(op, iso, atol=1e-7)
+
+
+def test_so3_ordering_n0_block_matches_s2():
+    # The (m=0, n=0) sub-block (dipole along the body axis) reproduces the S^2
+    # ordering operator's relaxation spectrum -- same physics on the P_l functions.
+    lam, lmax = 2.0, 6
+    l3, m3, n3 = quantum_numbers_so3(lmax)
+    G3 = OrderingPotentialDiffusion(1.0, lam).diffusion_matrix_so3(l3, m3, n3, 1)[0]
+    sel3 = (m3 == 0) & (n3 == 0) & (l3 % 2 == 0)
+    ev3 = np.sort(np.linalg.eigvals(G3[np.ix_(sel3, sel3)]).real)[::-1]
+    l2, m2 = quantum_numbers(lmax)
+    G2 = ordering_potential_block(l2, m2, 1.0, lam)
+    sel2 = (m2 == 0) & (l2 % 2 == 0)
+    ev2 = np.sort(np.linalg.eigvals(G2[np.ix_(sel2, sel2)]).real)[::-1]
+    np.testing.assert_allclose(ev3, ev2, atol=1e-6)
+
+
+def test_so3_ordering_equilibrium_null_mode():
+    # Gamma_SO3 . c_eq = 0 (c_eq ~ exp(lam P2(cos beta))). lam=1 @ lmax=10 is
+    # converged for the T+ L~ T- construction (needs higher lmax than S^2).
+    lam, lmax, tol = 1.0, 10, 1e-3
+    l, mm, n = quantum_numbers_so3(lmax)
+    model = OrderingPotentialDiffusion(2.5, lam)
+    G = model.diffusion_matrix_so3(l, mm, n, 1)[0]
+    ceq = model.equilibrium_coeffs_so3(l, mm, n)
+    res = np.linalg.norm(G @ ceq) / np.linalg.norm(ceq)
+    assert res < tol, f"||G c_eq|| / ||c_eq|| = {res:.2e}"
+
+
+# ---------------------------------------------------------------------------
+# Director orientation of the ordering potential (aligned/membrane samples)
+# ---------------------------------------------------------------------------
+def test_director_default_matches_axial():
+    # director=(0,0) (the default) is the lab-z axial operator.
+    l, m = quantum_numbers(8)
+    axial = OrderingPotentialDiffusion(2.0, lam=2.0).diffusion_matrix(l, m, 1)
+    explicit = OrderingPotentialDiffusion(2.0, lam=2.0,
+                                          director=(0.0, 0.0)).diffusion_matrix(l, m, 1)
+    np.testing.assert_allclose(explicit, axial, atol=1e-12)
+
+
+def test_director_rates_are_rotation_invariant():
+    # Tilting the director must not change the relaxation spectrum (the rates are
+    # rotation-invariant; only the equilibrium's lab orientation changes).
+    l, m = quantum_numbers(8)
+    G_axial = OrderingPotentialDiffusion(1.0, lam=2.0).diffusion_matrix(l, m, 1)[0]
+    G_tilt = OrderingPotentialDiffusion(1.0, lam=2.0, director=(np.radians(40), np.radians(25))
+                                        ).diffusion_matrix(l, m, 1)[0]
+    # even-l subspace (the reachable one); compare sorted eigenvalues
+    sel = (l % 2 == 0)
+    ev0 = np.sort(np.linalg.eigvals(G_axial[np.ix_(sel, sel)]).real)
+    ev1 = np.sort(np.linalg.eigvals(G_tilt[np.ix_(sel, sel)]).real)
+    np.testing.assert_allclose(ev1, ev0, atol=1e-6)
+
+
+def test_director_tilted_equilibrium_null_mode_and_orientation():
+    # The tilted operator still annihilates its (tilted) equilibrium, and that
+    # equilibrium is oriented along the director: its rank-2 part has m!=0 content
+    # (it is not axial about lab-z).
+    l, m = quantum_numbers(10)
+    director = (np.radians(50), np.radians(30))
+    model = OrderingPotentialDiffusion(1.0, lam=1.0, director=director)
+    G = model.diffusion_matrix(l, m, 1)[0]
+    ceq = model.equilibrium_coeffs(l, m)
+    assert np.linalg.norm(G @ ceq) / np.linalg.norm(ceq) < 1e-3      # null mode
+    l2m = (l == 2) & (m != 0)
+    assert np.max(np.abs(ceq[l2m])) > 0.05      # genuinely tilted (m!=0 rank-2)
