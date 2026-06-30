@@ -10,10 +10,11 @@ import pytest
 from rotational_diffusion_photophysics.engine_s2 import (
     quantum_numbers, real_sh_product_coeffs,
 )
+from rotational_diffusion_photophysics.engine_so3 import quantum_numbers_so3
 from rotational_diffusion_photophysics.models.diffusion import (
     IsotropicDiffusion, OrderingPotentialDiffusion, ordering_potential_block,
     two_component_anisotropy, order_parameter_from_cone_angle,
-    cone_angle_from_order_parameter,
+    cone_angle_from_order_parameter, AnisotropicDiffusion,
 )
 from rotational_diffusion_photophysics.utils.common import (
     kinetic_prod_block, sh_multiplication_operator, linear_light_matter_coeffs,
@@ -226,3 +227,55 @@ def test_aligned_equilibrium_ic_no_quench():
     assert abs(c20[0] - ceq[i20]) < 1e-9    # started at c_eq (not isotropic 0)
     assert ceq[i20] > 0.1                   # c_eq genuinely anisotropic at lam=2
     assert np.std(c20) < 1e-6               # constant in the dark: no quench
+
+
+# ---------------------------------------------------------------------------
+# M5: axially-symmetric diffusion tensor (D_par, D_perp) on SO(3)
+# ---------------------------------------------------------------------------
+def test_anisotropic_l2_rates_are_woessner():
+    # The l=2 relaxation rates are the symmetric-top trio (Favro/Woessner):
+    #   |n|=0: 6 D_perp ; |n|=1: 5 D_perp + D_par ; |n|=2: 2 D_perp + 4 D_par.
+    l, mm, n = quantum_numbers_so3(4)
+    Dpar, Dperp = 3.0, 1.0
+    D = AnisotropicDiffusion(Dpar, Dperp).diffusion_matrix_so3(l, mm, n, 1)[0]
+    rates = -np.diag(D).real
+    for nn, expected in [(0, 6*Dperp), (1, 5*Dperp + Dpar), (2, 2*Dperp + 4*Dpar)]:
+        sel = (l == 2) & (np.abs(n) == nn)
+        np.testing.assert_allclose(rates[sel], expected, atol=1e-9)
+    assert np.max(np.abs(D - np.diag(np.diag(D)))) < 1e-12     # diagonal
+
+
+def test_anisotropic_reduces_to_isotropic_when_equal():
+    l, mm, n = quantum_numbers_so3(4)
+    iso = IsotropicDiffusion(diffusion_coefficient=2.0).diffusion_matrix_so3(l, mm, n, 1)
+    aniso = AnisotropicDiffusion(2.0, 2.0).diffusion_matrix_so3(l, mm, n, 1)
+    np.testing.assert_allclose(aniso, iso, atol=1e-12)
+
+
+def test_anisotropic_engine_reduces_to_isotropic():
+    # SystemSO3 with AnisotropicDiffusion(D, D) must reproduce IsotropicDiffusion(D)
+    # end-to-end (confirms the diffusion_matrix_so3 engine path).
+    pytest.importorskip("spherical")
+    from rotational_diffusion_photophysics.engine_so3 import SystemSO3
+    from rotational_diffusion_photophysics.models.fluorophore import NegativeSwitcher
+    from rotational_diffusion_photophysics.models.illumination import ModulatedLasers
+    from rotational_diffusion_photophysics.models.detection import PolarizedDetection
+
+    fl = NegativeSwitcher(
+        extinction_coeff_on=[5260, 51560], extinction_coeff_off=[22000, 60],
+        wavelength=[405, 488], lifetime_on=1.6e-9, quantum_yield_on_fluo=0.35,
+        quantum_yield_on_to_off=1.65e-2,
+        dipole_orientation_cis_anionic=(35.0, 0.0),
+        dipole_orientation_trans=(0.0, 0.0),
+        flurophore_type='rsFP_negative_4states')
+    las = ModulatedLasers(power_density=[1e2, 1e2], wavelength=[405, 488],
+                          polarization=['x', 'xy'], modulation=[[1], [1]],
+                          time_windows=[1.0], time0=0.0,
+                          numerical_aperture=1.4, refractive_index=1.518)
+    det = PolarizedDetection(polarization=['x', 'y'], numerical_aperture=1.4,
+                             refractive_index=1.518)
+    D = 1 / (6 * 100e-6)
+    t = np.linspace(0, 1.0, 15)
+    iso = SystemSO3(fl, IsotropicDiffusion(D), las, det, lmax=4).detector_signals(t)
+    ani = SystemSO3(fl, AnisotropicDiffusion(D, D), las, det, lmax=4).detector_signals(t)
+    np.testing.assert_allclose(ani, iso, rtol=1e-9, atol=1e-12)

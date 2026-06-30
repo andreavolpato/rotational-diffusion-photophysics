@@ -324,8 +324,13 @@ class SystemSO3:
         nwindows = modulation.shape[1]
         nlasers = modulation.shape[0]
 
-        D = isotropic_diffusion_matrix_so3(
-            self.l, self.diffusion.diffusion_coefficient, ns)
+        # Diffusion blocks: use the model's SO(3) operator if it defines one
+        # (e.g. an anisotropic tensor, diagonal in (l, n)); else isotropic.
+        if hasattr(self.diffusion, "diffusion_matrix_so3"):
+            D = self.diffusion.diffusion_matrix_so3(self.l, self.m, self.n, ns)
+        else:
+            D = isotropic_diffusion_matrix_so3(
+                self.l, self.diffusion.diffusion_coefficient, ns)
 
         k = self.fluorophore.kinetics_matrix()  # (nwl+1, ns, ns) scalars
         wavelength_indexes = np.concatenate(

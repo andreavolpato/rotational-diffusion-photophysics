@@ -21,6 +21,45 @@ class IsotropicDiffusion:
                 nspecies)
         return D
 
+    def diffusion_matrix_so3(self, l, m, n, nspecies):
+        # SO(3) (Wigner-D) blocks: isotropic diffusion is diagonal with eigenvalue
+        # -l(l+1)D_r, independent of the body index n.
+        block = np.diag((-l * (l + 1) * self.diffusion_coefficient).astype(complex))
+        return np.repeat(block[None, :, :], nspecies, axis=0)
+
+
+class AnisotropicDiffusion:
+    """Free rotational diffusion of an axially-symmetric top (symmetry axis = the
+    body z-axis, i.e. the Wigner-D body index n), with diffusion coefficients
+    D_parallel (about the symmetry axis) and D_perp (tumbling of the axis).
+
+    SO(3)-only: the body-frame tensor is meaningful only when the full orientation
+    is tracked (the S^2 dipole-axis engine cannot represent it). The operator is
+    diagonal in the (l, m, n) basis:
+        eigenvalue = -[ l(l+1) D_perp  +  n^2 (D_parallel - D_perp) ]
+    (Favro 1960; Woessner 1962). The rank-2 (l=2) rates are the classic symmetric-
+    top trio 6 D_perp (n=0), 5 D_perp + D_par (n=+-1), 2 D_perp + 4 D_par (n=+-2),
+    giving the up-to-3-exponential anisotropy decay when the transition dipole is
+    tilted off the symmetry axis. D_parallel = D_perp recovers isotropic diffusion.
+    Free rotor -> the anisotropy decays fully (no plateau).
+    """
+
+    def __init__(self,
+                 diffusion_coefficient_parallel=14e-9,  # D_par about symmetry axis [Hz]
+                 diffusion_coefficient_perp=14e-9,       # D_perp tumbling [Hz]
+                 ):
+        self.diffusion_coefficient_parallel = diffusion_coefficient_parallel
+        self.diffusion_coefficient_perp = diffusion_coefficient_perp
+        # An effective isotropic coefficient, for any code path that asks for one.
+        self.diffusion_coefficient = diffusion_coefficient_perp
+
+    def diffusion_matrix_so3(self, l, m, n, nspecies):
+        Dpar, Dperp = (self.diffusion_coefficient_parallel,
+                       self.diffusion_coefficient_perp)
+        ddiag = -(l * (l + 1) * Dperp + n**2 * (Dpar - Dperp))
+        block = np.diag(ddiag.astype(complex))
+        return np.repeat(block[None, :, :], nspecies, axis=0)
+
 def isotropic_diffusion_matrix(l, m, diffusion_coefficient, nspecies):
     # Make all the diffusion matrices for all the species assuming isotropic
     # rotational diffusion and the same rotational diffusion coefficient for
@@ -132,7 +171,7 @@ def ordering_potential_block(l, m, diffusion_coefficient, lam):
 
 
 ################################################################################
-# Plan A: analytic two-component (wobble + global) anisotropy (a50 n020)
+# Analytic two-component (wobble + global) anisotropy (a50 n020)
 ################################################################################
 # A closed-form anisotropy decay for the common ISOTROPIC ENSEMBLE (vesicles,
 # cells): a fast restricted wobble that loses anisotropy down to a plateau set by
