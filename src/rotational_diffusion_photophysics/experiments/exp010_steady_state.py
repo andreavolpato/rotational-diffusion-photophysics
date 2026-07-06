@@ -166,9 +166,11 @@ class experiment:
         # Total fluorescence photons EMITTED over the whole experiment (4*pi,
         # before collection efficiency): N * k_r * integral of the excited-state
         # population, with k_r = Phi_fluo / tau. The l=0,m=0 coefficient of the
-        # fluorescent species (system._c) is its population.
+        # fluorescent species (system._c) is its population -- physically real; the
+        # SO(3) (complex Wigner-D) engine carries it as complex with a numerically
+        # negligible imaginary part (roundoff), so take the real part explicitly.
         exc = int(np.nonzero(self.fluorophore.quantum_yield_fluo)[0][0])
-        p_exc = system._c[exc, 0, :]
+        p_exc = system._c[exc, 0, :].real
         k_r = self.fluorophore.quantum_yield_fluo[exc] / self.fluorophore.lifetime_on
         total_emitted_photons = float(self.n_molecules * k_r * np.sum(p_exc) * dt)
 
