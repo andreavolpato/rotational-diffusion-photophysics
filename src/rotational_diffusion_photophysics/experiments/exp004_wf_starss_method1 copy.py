@@ -38,22 +38,34 @@ class experiment:
     variant is made with ``dataclasses.replace``.
     """
     tau: float = 100e-6           # rotational correlation time [s]
-    power_405: float = 176.7e3    # 405 nm power density [W/cm^2]
-    power_488: float = 17.6e3 / 6 # 488 nm power density [W/cm^2]
+    power_405: float = 9e3    # 405 nm power density [W/cm^2]
+    power_488: float = 5e3     # 488 nm power density [W/cm^2]
     pol_405: str = 'x'            # 405 nm polarization
     pol_488: str = 'xy'           # 488 nm polarization (circular)
     # pulse scheme: [488 preconditioning, 405 activation, readout]
-    time_windows: tuple = (10e-3, 250e-9, 3e-3)
-    modulation_405: tuple = (0, 1, 0)
-    modulation_488: tuple = (1, 1, 1)
+    time_windows: tuple = (2e-3, 1e-6, 1e-6, 1e-6, 200e-6, 20e-3,
+                           2e-3, 1e-6, 1e-6, 1e-6, 200e-6, 20e-3,
+                           2e-3, 1e-6, 1e-6, 1e-6, 200e-6, 20e-3,
+                           2e-3, 1e-6, 1e-6, 1e-6, 200e-6, 20e-3,
+                           )
+    modulation_405: tuple = (0,0,1,0,0,0,
+                             0,0,0,0,0,0,
+                             0,0,1,0,0,0,
+                             0,0,0,0,0,0,
+                             )
+    modulation_488: tuple = (1,0,0,0,1,0,
+                             1,0,0,0,1,0,
+                             1,0,0,0,1,0,
+                             1,0,0,0,1,0,
+                             )       
     det_pol: tuple = ('x', 'y')   # cross-polarized detection channels
-    na: float = 1.4               # numerical aperture
-    ri: float = 1.518             # refractive index of immersion medium
+    na: float = 0.75              # numerical aperture
+    ri: float = 1.0               # refractive index of immersion medium
     lmax: int = 6                 # spherical-harmonics cutoff
     fluorophore: object = field(default=rsEGFP2_8states)
     t_start: float = 0.0          # first readout time point [s]
-    t_stop: float = 3e-3          # last readout time point [s]
-    n_time: int = 1000            # number of time points
+    t_stop: float = 200e-6        # last readout time point [s]
+    n_time: int = 100             # number of time points
 
     @property
     def time0(self) -> float:
