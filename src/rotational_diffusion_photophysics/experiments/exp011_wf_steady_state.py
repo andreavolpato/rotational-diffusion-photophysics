@@ -49,13 +49,13 @@ class experiment:
     det_pol: tuple = ('x', 'y')   # cross-polarized detection channels
     na: float = 0.75              # numerical aperture
     ri: float = 1.000             # refractive index of immersion medium
-    lmax: int = 6                 # spherical-harmonics cutoff
+    lmax: int = 12                 # spherical-harmonics cutoff
     engine: str = 's2'           # engine representation ('so3' or 'wigner')
     # --- pulse scheme (phase durations as fractions of total_time) ---
     waiting_time: float = 2.0e-3        # time before phase 1 starts [s]
-    equilibration_time: float = 0.0e-3  # time before phase 2 starts [s]
+    equilibration_time: float = 2.0e-3  # time before phase 2 starts [s]
     readout_time: float = 20.0e-3       # time after phase 2 ends [s]
-    n_time: int = 500                # number of time points over the whole scheme
+    n_time: int = 50                # number of time points over the whole scheme
     fluorophore: object = field(default=rsEGFP2_8states)  # swappable fluorophore
     # --- photon-counting / SNR parameters ---
     n_molecules: float = 1e4          # number of emitters in the probed volume
