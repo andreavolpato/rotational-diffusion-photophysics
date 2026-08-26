@@ -49,8 +49,8 @@ class experiment:
     det_pol: tuple = ('x', 'y')   # cross-polarized detection channels
     na: float = 0.75              # numerical aperture
     ri: float = 1.000             # refractive index of immersion medium
-    lmax: int = 12                 # spherical-harmonics cutoff
-    engine: str = 's2'           # engine representation ('so3' or 'wigner')
+    lmax: int = 6                 # spherical-harmonics cutoff
+    engine: str = 'so3'           # engine representation ('so3' or 'wigner')
     # --- pulse scheme (phase durations as fractions of total_time) ---
     waiting_time: float = 2.0e-3        # time before phase 1 starts [s]
     equilibration_time: float = 2.0e-3  # time before phase 2 starts [s]

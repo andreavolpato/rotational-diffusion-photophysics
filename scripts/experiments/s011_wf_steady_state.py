@@ -20,7 +20,7 @@ from rotational_diffusion_photophysics.experiments.exp011_wf_steady_state import
 from rotational_diffusion_photophysics.utils.signals import anisotropy, detected_counts
 
 power_405_scale = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-
+power_405_scale = [0.1, 1, 10, 100]
 
 def sweep_405(scales=power_405_scale, base: experiment = None):
     """Re-run the experiment with both 405 powers scaled by each factor in
@@ -37,6 +37,7 @@ def sweep_405(scales=power_405_scale, base: experiment = None):
                       power_405_2=base.power_405_2 * s).run()
         t = res.t
         counts.append(res.counts)
+        print(f"  405 scale {s:.3g}: counts = {res.counts.sum(axis=1)}")
     return scales, t, np.array(counts)
 
 
