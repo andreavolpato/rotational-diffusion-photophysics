@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from scipy.special import erf
 
+from rotational_diffusion_photophysics.core import solve_evolution
 from rotational_diffusion_photophysics.engine_s2 import SystemS2 as System
 from rotational_diffusion_photophysics.models.detection import PolarizedDetection
 from rotational_diffusion_photophysics.models.diffusion import IsotropicDiffusion
@@ -140,6 +141,42 @@ def _ground_after_saturation(polarization, a=3.0, lmax=6):
     flux = laser.photon_flux[0]
     system.solve(np.array([0.0, a / (dye.cross_section * flux)]))
     return float(system._c[0, 0, -1].real)
+
+
+@pytest.mark.parametrize("polarization", ["x", "y"])
+@pytest.mark.parametrize("dose", [3.0, 30.0])
+def test_even_l_reduction_is_exact_under_saturation(polarization, dose):
+    # engine_s2.solve restricts the eigenproblem to the even-l subspace. That is
+    # exact -- not a weak-field linearization -- because the photoselection
+    # function has only even rank and parity is preserved order-by-order by the
+    # matrix exponential, so odd l is never reached from an l=0 start at ANY
+    # power. Checked adversarially here, deep into saturation and on a non-axial
+    # (x/y) polarization, which is where the reduction would break first.
+    # The SO(3) analogue is test_engine_so3.test_even_m_reduction_is_exact_under_saturation.
+    laser = ModulatedLasers(
+        power_density=[1e-2], wavelength=[488], polarization=[polarization],
+        modulation=[[1]], time_windows=[1e9], time0=0.0,
+        numerical_aperture=1.4, refractive_index=1.518,
+    )
+    detector = PolarizedDetection(
+        polarization=["x", "y"], numerical_aperture=1.4, refractive_index=1.518)
+    dye = _SaturationDye()
+    system = System(fluorophore=dye, diffusion=IsotropicDiffusion(0.0),
+                    illumination=laser, detection=detector, lmax=6)
+
+    M = system.diffusion_kinetics_matrix()
+    c0 = np.zeros((dye.nspecies, system._l.size))
+    c0[:, 0] = dye.starting_populations
+    t = np.array([0.0, dose / (dye.cross_section * laser.photon_flux[0])])
+
+    even = system._l % 2 == 0
+    c_full, _, _ = solve_evolution(M[0], c0, t, keep_mask=None)
+    c_even, _, _ = solve_evolution(M[0], c0, t, keep_mask=even)
+
+    # The dropped subspace stays empty in the unreduced solution ...
+    assert np.abs(c_full[:, ~even, :]).max() < 1e-10
+    # ... so reducing the eigenproblem changes nothing.
+    np.testing.assert_allclose(c_even, c_full, atol=1e-10)
 
 
 @pytest.mark.parametrize("polarization", ["x", "y", "z"])

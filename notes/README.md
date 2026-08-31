@@ -7,9 +7,10 @@ file in `build/`, and never commit one.
 | file | what it is |
 |---|---|
 | `notes.tex` | the current document (LaTeX; STARSS methods 1–3 + the 2022 S² formalism) |
+| `formalism.md` | **draft** replacement for the theory chapter, in markdown: the representation-agnostic core, the S² representation, and the photophysical schemes. Not yet spliced into `notes.tex` |
 | `references.bib` | bibliography, used by both the LaTeX and the markdown routes |
 | `figures/` | figure sources (`.png` for inclusion, `.ai`/`.pptx` originals) |
-| `section_order.md` | planned section order of the parent SI document |
+| `header.tex` | layout preamble for the markdown route (packages only — **not** biblatex) |
 | `build/` | **generated** — PDFs, `.tex` from markdown, and all LaTeX aux files. Git-ignored |
 
 New chapters are written in **markdown** and converted to LaTeX/PDF with pandoc; the
