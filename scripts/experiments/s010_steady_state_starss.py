@@ -14,25 +14,25 @@ collected on two cross-polarized detectors (X, Y). The 405-induced signal is the
 background-subtracted (channels - backgrounds), from which the anisotropy and
 polarization and their photon-shot-noise SNR are computed.
 
-The whole experiment is described by a single ``S010Params`` dataclass, so a
-parameter sweep is just "vary one field". Use :func:`sweep`::
+The whole experiment is described by the single ``exp010_steady_state.experiment``
+dataclass, so a parameter sweep is just "vary one field". Use :func:`sweep`::
 
-    base = S010Params()
     pw, snr = sweep("power_488", [0.5, 1, 2, 4],
                     observable=measured_anisotropy_snr)
 
-This is a prototyping script (a20 "graduation" step 1): everything is built
-inline against the engine. Once the parameters settle, ``S010Params`` lifts
-directly into a registered ``Experiment`` factory in
-``rotational_diffusion_photophysics.experiments``.
+Every run is stored under ``$RDP_RUNS`` (see ``store``): single runs keep their
+figures in their own run folder, while sweeps and the experiment set write
+theirs to a session folder with a ``runs.txt`` naming the runs behind them. A
+repeated run or sweep is loaded from the store instead of recomputed.
 
-Run:  python scripts/experiments/s010_cross_polarized_steady_state.py
+Run:  python scripts/experiments/s010_steady_state_starss.py
 """
 from dataclasses import replace
 from typing import Callable, Sequence
 
 import numpy as np
 
+from rotational_diffusion_photophysics import store
 from rotational_diffusion_photophysics.experiments.exp010_steady_state import experiment, results
 from rotational_diffusion_photophysics.utils.contrast import contrast_of
 from rotational_diffusion_photophysics.utils.format import _human
@@ -69,30 +69,32 @@ def sweep(param: str,
           values: Sequence,
           base: experiment = None,
           observable: Callable = measured_anisotropy):
-    """Vary one ``S010Params`` field over ``values`` and reduce each run.
+    """Vary one ``experiment`` field over ``values`` and reduce each run.
 
-    Returns ``(values, results)`` as arrays. ``observable`` maps a single
-    :class:`Result` to the scalar/array you want to collect.
+    Returns ``(values, reduced)`` as arrays. ``observable`` maps a single
+    :class:`results` to the scalar/array you want to collect. Each variant is a
+    stored run, so a repeated sweep is free.
     """
     if base is None:
         base = experiment()
     if not hasattr(base, param):
-        raise AttributeError(f"S010Params has no field '{param}'")
+        raise AttributeError(f"experiment has no field '{param}'")
     values = np.asarray(values)
-    results = np.array([observable(replace(base, **{param: v}).run())
+    reduced = np.array([observable(store.run_cached(replace(base, **{param: v}),
+                                                   label=f'{param}-{v:.4g}'))
                         for v in values])
-    return values, results
+    return values, reduced
 
 
 # ----------------------------------------------------------------------------
 # Entry points
 # ----------------------------------------------------------------------------
-def main(params: experiment = None):
+def main(params: experiment = None, label='default'):
     import matplotlib.pyplot as plt
 
     if params is None:
         params = experiment()
-    res = params.run()
+    res = store.run_cached(params, label=label)
     print(f"background counts (x, y) = {res.backgrounds[0]:.4g}, {res.backgrounds[1]:.4g}")
     print(f"channel    counts (x, y) = {res.channels[0]:.4g}, {res.channels[1]:.4g}")
     print(f"anisotropy   r = {res.anisotropy:.4f} +/- {res.anisotropy_std:.4f} "
@@ -151,21 +153,33 @@ def main(params: experiment = None):
 
     fig.suptitle('s010 two-phase cross-polarized experiment (rsEGFP2)')
     fig.tight_layout()
+
+    run = store.run_dir(params)
+    store.save_open_figures(run)
+    print(f'saved -> {run}')
     plt.show()
 
 
 def main_sweep(param='power_488', values=(0.5, 1.0, 2.0, 4.0, 8.0),
-               observable=measured_anisotropy_snr):
+               observable=measured_anisotropy_snr, base: experiment = None):
     """Example sweep: a measured observable vs one parameter."""
     import matplotlib.pyplot as plt
 
-    values, ys = sweep(param, values, observable=observable)
+    if base is None:
+        base = experiment()
+    values, ys = sweep(param, values, base=base, observable=observable)
     plt.figure(figsize=(6, 4))
     plt.plot(values, ys, 'o-')
     plt.xlabel(param)
     plt.ylabel(observable.__name__)
     plt.title(f's010 sweep: {observable.__name__} vs {param}')
     plt.tight_layout()
+
+    sess = store.session(f's010_sweep_{param}')
+    store.save_open_figures(sess)
+    (sess / 'runs.txt').write_text('\n'.join(
+        str(store.run_dir(replace(base, **{param: v}))) for v in values))
+    print(f'saved -> {sess}')
     plt.show()
 
 
@@ -189,10 +203,15 @@ EXPERIMENTS = {
 
 
 def run_all(experiments: dict = None) -> dict:
-    """Run every experiment in ``experiments`` (default EXPERIMENTS) -> {label: Result}."""
+    """Run every experiment in ``experiments`` (default EXPERIMENTS) -> {label: Result}.
+
+    Each condition is stored under its own label, so re-running the set after a
+    plotting change costs nothing.
+    """
     if experiments is None:
         experiments = EXPERIMENTS
-    return {label: params.run() for label, params in experiments.items()}
+    return {label: store.run_cached(params, label=label)
+            for label, params in experiments.items()}
 
 
 # ----------------------------------------------------------------------------
@@ -358,15 +377,24 @@ def main_set(experiments: dict = None):
     """Run the experiment set and show the comparison figures."""
     import matplotlib.pyplot as plt
 
-    results = run_all(experiments)
-    for name, res in results.items():
+    if experiments is None:
+        experiments = EXPERIMENTS
+    runs = run_all(experiments)
+    for name, res in runs.items():
         print(f"{name:>16}: p = {res.polarization:+.4f} +/- {res.polarization_std:.4f} "
               f"(SNR {res.polarization_snr:.0f}, {_human(res.total_emitted_photons)} ph)")
-    plot_polarization_bars(results)
-    plot_anisotropy_bars(results)
-    plot_counts_bars(results)
-    plot_contrast_over_photons(results, readout='polarization')
-    plot_time_evolution(results)
+    plot_polarization_bars(runs)
+    plot_anisotropy_bars(runs)
+    plot_counts_bars(runs)
+    plot_contrast_over_photons(runs, readout='polarization')
+    plot_time_evolution(runs)
+
+    # Comparison figures belong to the set, not to any single run.
+    sess = store.session('s010_experiment_set')
+    store.save_open_figures(sess)
+    (sess / 'runs.txt').write_text('\n'.join(
+        f'{label}\t{store.run_dir(params)}' for label, params in experiments.items()))
+    print(f'saved -> {sess}')
     plt.show()
 
 

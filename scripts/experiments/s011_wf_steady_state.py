@@ -15,38 +15,54 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LogNorm
 
+from rotational_diffusion_photophysics import store
 from rotational_diffusion_photophysics.core import find_wavelenght
 from rotational_diffusion_photophysics.experiments.exp011_wf_steady_state import experiment
 from rotational_diffusion_photophysics.utils.signals import anisotropy, detected_counts
 
-power_405_scale = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 power_405_scale = [0.1, 1, 10, 100]
+
+
+def scaled(base: experiment, scale: float) -> experiment:
+    """``base`` with both 405 beams scaled by ``scale``."""
+    return replace(base,
+                   power_405_1=base.power_405_1 * scale,
+                   power_405_2=base.power_405_2 * scale)
+
 
 def sweep_405(scales=power_405_scale, base: experiment = None):
     """Re-run the experiment with both 405 powers scaled by each factor in
     ``scales``. Returns (scales, t, counts) with counts of shape
-    (n_scale, 2, n_time) [scale, channel(par/perp), time]."""
+    (n_scale, 2, n_time) [scale, channel(par/perp), time]. Each scale is a
+    stored run, so a repeated sweep is loaded instead of recomputed."""
     if base is None:
         base = experiment()
     scales = np.asarray(scales, dtype=float)
     t = None
     counts = []
     for s in scales:
-        res = replace(base,
-                      power_405_1=base.power_405_1 * s,
-                      power_405_2=base.power_405_2 * s).run()
+        res = store.run_cached(scaled(base, s), label=f'405-scale-{s:.4g}')
         t = res.t
         counts.append(res.counts)
         print(f"  405 scale {s:.3g}: counts = {res.counts.sum(axis=1)}")
     return scales, t, np.array(counts)
 
 
-def main(scales=power_405_scale, base=experiment()):
+def main(scales=power_405_scale, base: experiment = None):
+    if base is None:
+        base = experiment()
     scales, t, counts = sweep_405(scales, base)
-    
+
     plot_count_traces(scales, t, counts)
     plot_saturation(scales, counts, base)
     plot_excitation_split(base)
+
+    # The sweep figures span every scale, so they belong to a session folder.
+    sess = store.session('s011_wf_steady_state')
+    store.save_open_figures(sess)
+    (sess / 'runs.txt').write_text('\n'.join(
+        f'{s:.4g}\t{store.run_dir(scaled(base, s))}' for s in scales))
+    print(f'saved -> {sess}')
 
     plt.show()
 

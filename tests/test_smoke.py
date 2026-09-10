@@ -6,9 +6,20 @@ regressions (that is ``test_regression.py``), but they fail loudly if a
 refactor breaks imports, wiring, or public constructors.
 """
 import importlib
+import pkgutil
+from dataclasses import replace
 
 import numpy as np
 import pytest
+
+import rotational_diffusion_photophysics.experiments as _experiments
+
+# Every experiment module in the package, discovered rather than listed: a new
+# experiment is covered the day it is added, and a module that cannot be
+# imported (a stray filename, a bad import) fails here instead of rotting.
+EXPERIMENT_MODULES = sorted(
+    m.name for m in pkgutil.iter_modules(_experiments.__path__)
+    if m.name.startswith("exp"))
 
 CORE_MODULES = [
     "rotational_diffusion_photophysics",
@@ -21,23 +32,9 @@ CORE_MODULES = [
     "rotational_diffusion_photophysics.models.diffusion",
     "rotational_diffusion_photophysics.models.fluorophore",
     "rotational_diffusion_photophysics.models.illumination",
-    "rotational_diffusion_photophysics.experiments.exp001_starss_method1",
-    "rotational_diffusion_photophysics.experiments.exp002_starss_method2",
-    "rotational_diffusion_photophysics.experiments.exp003_starss_method3",
-    "rotational_diffusion_photophysics.experiments.exp010_steady_state",
-    "rotational_diffusion_photophysics.experiments.exp020_first_time_is_special",
-    "rotational_diffusion_photophysics.experiments.exp030_starss_sted",
-]
-
-# experiment modules whose experiment().run() returns a result with `.signals`
-EXPERIMENT_MODULES = [
-    "exp001_starss_method1",
-    "exp002_starss_method2",
-    "exp003_starss_method3",
-    "exp010_steady_state",
-    "exp020_first_time_is_special",
-    "exp030_starss_sted",
-]
+    "rotational_diffusion_photophysics.store",
+] + [f"rotational_diffusion_photophysics.experiments.{name}"
+     for name in EXPERIMENT_MODULES]
 
 
 @pytest.mark.parametrize("module", CORE_MODULES)
@@ -56,9 +53,16 @@ def test_predefined_fluorophores_exist():
 
 @pytest.mark.parametrize("modname", EXPERIMENT_MODULES)
 def test_experiments_run(modname):
+    """Every experiment wires up and produces finite signals.
+
+    Run at coarse resolution (few time points, small basis): what is under test
+    is the wiring, not the numerics -- those are pinned in ``test_regression``.
+    Full-resolution runs of every experiment would cost minutes.
+    """
     mod = importlib.import_module(
         f"rotational_diffusion_photophysics.experiments.{modname}")
-    res = mod.experiment().run()
+    params = replace(mod.experiment(), n_time=16, lmax=2)
+    res = params.run()
     assert res.signals.shape[1] == res.t.size
     assert np.all(np.isfinite(res.signals))
 

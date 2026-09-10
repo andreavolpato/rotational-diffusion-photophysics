@@ -2,20 +2,22 @@
 
 Runs ``exp030`` (cross-polarized 640 nm excitation + 775 nm STED on ATTO647N)
 and plots the pulse scheme, the time-resolved anisotropy, and the two detector
-signals.
+signals. The run and its figures are stored under ``$RDP_RUNS`` (see ``store``);
+an identical re-run is loaded from the store instead of recomputed.
 
 Run:  python scripts/experiments/s030_starss_sted.py
 """
 import matplotlib.pyplot as plt
 
+from rotational_diffusion_photophysics import store
 from rotational_diffusion_photophysics.experiments.exp030_starss_sted import experiment
 from rotational_diffusion_photophysics.plot.plot_pulse_scheme import plot_pulse_scheme
 
 
-def main(params: experiment = None):
+def main(params: experiment = None, label='default'):
     if params is None:
         params = experiment()
-    res = params.run()
+    res = store.run_cached(params, label=label)
     t = res.t
 
     xlim = [params.t_start, params.t_stop]
@@ -37,6 +39,9 @@ def main(params: experiment = None):
     ax2.set_xlabel('Time (s)')
     ax2.sharex(ax0)
 
+    run = store.run_dir(params)
+    store.save_open_figures(run)
+    print(f'saved -> {run}')
     plt.show()
 
 

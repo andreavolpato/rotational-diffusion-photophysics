@@ -1,10 +1,11 @@
-"""exp001 - STARSS method 1 (rsEGFP2, 8-state model).
+"""exp004 - widefield STARSS method 1 (rsEGFP2, 8-state model).
 
-A short polarized 405 nm activation pulse on-switches an oriented sub-population,
-read out continuously by circularly polarized 488 nm light; the cross-polarized
-fluorescence gives an anisotropy decay that tracks rotational diffusion. A single
-pulse scheme produces the experimental observable directly. Promotes the former
-``models.starss.starss1`` into the ``experiment``/``results`` structure.
+The ``exp001`` observable under widefield conditions: low NA in air (0.75, air
+objective) and much lower power densities, so the pulse scheme repeats the
+[488 pre-conditioning, 405 activation, 488 readout] block four times instead of
+running one activation. Otherwise identical to ``exp001``: a polarized 405 nm
+pulse on-switches an oriented sub-population, circularly polarized 488 nm reads
+it out, and the cross-polarized fluorescence gives the anisotropy decay.
 """
 from dataclasses import dataclass, field
 
